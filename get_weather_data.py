@@ -1,21 +1,29 @@
 import requests, json, datetime, os
 from dotenv import load_dotenv
+import paho.mqtt.client as mqtt
+
+client = mqtt.Client(
+    mqtt.CallbackAPIVersion.VERSION2
+)
 
 load_dotenv()
-URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
-KEY = os.getenv("GOOGLE_API_KEY")
+URL = "https://api.open-meteo.com/v1/forecast"
 
+#ダミーデータとして、東京駅周辺のロケーション
 params = {
-    "key":KEY,
-    "location.latitude":"",
-    "location.longitude":""
+    "latitude":35.6812,
+    "longitude":139.7671,
+    "current": "temperature_2m,wind_speed_10m"
 }
 
 
 def main():
-    response = requests.get(URL,params=params)
+    res = requests.get(URL,params=params)
     
-    print(response.status_code)
+    print(res.status_code)
+    
+    data = res.json()
+    print(data)
 
 if __name__ == "__main__":
     main()
