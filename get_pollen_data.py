@@ -1,5 +1,3 @@
-
-
 # 生データ取得
 def get_pollen_data(location):
     # 今はダミー
@@ -32,5 +30,7 @@ def get_pollen_info(location):
 
     return result
 
-# if __name__ == "__main__":
-#
+if __name__ == "__main__":
+    output = get_pollen_info("Tokyo")
+    print("テスト結果")
+    print(output)
