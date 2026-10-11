@@ -12,13 +12,13 @@ def get_pollen_data(location):
 # データ成型
 def format_pollen_data(raw_pollen_data):
 
-    formated_data = {
+    formatted_data = {
         "status": "success",
         "location": raw_pollen_data["region"],
         "pollen_level": raw_pollen_data["daily_index"]
     }
 
-    return formated_data
+    return formatted_data
 
 # 他のから呼ばれるやつ
 def get_pollen_info(location):
