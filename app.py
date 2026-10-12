@@ -104,7 +104,7 @@ with col2:
     st.metric(label="☀️ 天気", value="取得中...")
 with col3:
     st.metric(label="💨 風速", value="取得中...")
-st.caption("※ 池田くん・大高くんのAPIと連携後に自動更新されます")
+
 
 st.markdown("<br>", unsafe_allow_html=True)
 
