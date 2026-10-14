@@ -62,7 +62,10 @@ def save_to_supabase(request_data):
     print("使用テーブル:", TABLE_NAME)
     print("送信データのarea:", repr(request_data.get("area")))
     print("送信データのouting_date:", repr(request_data.get("outing_date")))
+    #supabaseに対してrequest_dataを保存をしている。
     result = supabase.table(TABLE_NAME).insert(request_data).execute()
+    
+    # 登録結果を呼び出し元へ渡す。
     return result.data
 
 
@@ -79,6 +82,7 @@ def send_mqtt(request_data):
     )
 
     try:
+        # brokerに接続する。裏で処理回す。
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_start()
 
@@ -87,7 +91,8 @@ def send_mqtt(request_data):
             json.dumps(request_data, ensure_ascii=False),
             qos=1,
         )
-
+        
+        #送信完了を最大で5秒まつ
         info.wait_for_publish(timeout=5)
 
         if not info.is_published():
@@ -96,7 +101,8 @@ def send_mqtt(request_data):
             )
 
         return True
-
+    
+    #最後は通信終了
     finally:
         client.loop_stop()
         client.disconnect()
