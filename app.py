@@ -4,6 +4,8 @@ from datetime import date, timedelta
 # 【追加】高野さんが作ったファイルを読み込む（同じフォルダに recommend.py を置いておく）
 try:
     from recommend import get_recommendation
+except ImportError:
+    # まだ高野さんのファイルがない場合のダミー処理
     def get_recommendation(loc, d, a):
         return {
             "level": "注意レベル：高",
