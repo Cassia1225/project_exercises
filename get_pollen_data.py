@@ -13,7 +13,8 @@ def get_pollen_data(latitude=35.6812, longitude=139.7671):
         "location.latitude": latitude,
         "location.longitude": longitude,
         "days": 1,
-        "languageCode": "ja"
+        "languageCode": "ja",
+        "plantsDescription": True
     }
 
     response = requests.get(url, params=params)
