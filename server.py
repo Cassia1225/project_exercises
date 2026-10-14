@@ -1,12 +1,13 @@
 
 import json
 import os
-from datetime import date, time
+from datetime import date
 
 from dotenv import load_dotenv
 from supabase import create_client
 import paho.mqtt.client as mqtt
 
+# .envから設定を読み込む
 load_dotenv()
 
 # Supabaseの接続設定
@@ -22,45 +23,53 @@ MQTT_TOPIC = "pollen/request"
 
 def validate_request(data):
     """画面から受け取った入力内容を確認する。"""
-    required = ["area", "date", "time"]
 
-    for key in required:
-        if not data.get(key):
-            raise ValueError(f"{key} が入力されていません")
+    # 地域と日付が入力されているか確認
+    if not data.get("area"):
+        raise ValueError("地域が入力されていません")
 
-    # 日付と時刻の形式をチェックする
+    if not data.get("date"):
+        raise ValueError("日付が入力されていません")
+
+    # 日付の形式をチェックする
     date.fromisoformat(data["date"])
-    time.fromisoformat(data["time"])
 
+    # アレルギー情報をDBのtext型に合わせる
+    allergies = data.get("allergies", [])
+
+    if isinstance(allergies, list):
+        allergies = ", ".join(allergies)
+
+    # DBに保存するデータを作成
     return {
-        "area": data["area"],
-        "outing_date": data["date"],
-        "outing_time": data["time"],
-        "allergies": data.get("allergies", []),
-        "status": "received",
+    "area": data["area"],
+    "outing_date": data["date"],
+    "allergies": allergies,
+    "status": "received",
     }
 
 
 def save_to_supabase(request_data):
-    """入力内容をSupabaseに保存する。"""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError(
-            "Supabaseの接続設定がありません。.envを確認してください"
-        )
+        raise RuntimeError("Supabaseの接続設定がありません。.envを確認してください")
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("Supabaseクライアントを作成しました")
 
-    result = (
-        supabase.table(TABLE_NAME)
-        .insert(request_data)
-        .execute()
-    )
+    # 今回はAPIに送るデータを確認
+    print("DBに送るデータ:", request_data)
 
+    print("使用テーブル:", TABLE_NAME)
+    print("送信データのarea:", repr(request_data.get("area")))
+    print("送信データのouting_date:", repr(request_data.get("outing_date")))
+    result = supabase.table(TABLE_NAME).insert(request_data).execute()
     return result.data
 
 
 def send_mqtt(request_data):
     """設定されていれば、MQTTで入力内容を送信する。"""
+
+    # MQTTブローカーが未設定なら送信をスキップ
     if not MQTT_BROKER:
         print("MQTT未設定のため、送信をスキップしました")
         return False
@@ -78,10 +87,13 @@ def send_mqtt(request_data):
             json.dumps(request_data, ensure_ascii=False),
             qos=1,
         )
+
         info.wait_for_publish(timeout=5)
 
         if not info.is_published():
-            raise RuntimeError("MQTTメッセージを送信できませんでした")
+            raise RuntimeError(
+                "MQTTメッセージを送信できませんでした"
+            )
 
         return True
 
@@ -91,14 +103,17 @@ def send_mqtt(request_data):
 
 
 def process_request(data):
-    """入力を受け取り、保存して、通信する。"""
-    try:
-        request_data = validate_request(data)
+    """入力を受け取り、DBに保存して、MQTTで送信する。"""
 
-        # まず入力内容をDBに保存
+    try:
+        # 入力内容を確認
+        request_data = validate_request(data)
+        print("送信するデータ:", request_data)
+
+        # まずDBに保存
         saved_data = save_to_supabase(request_data)
 
-        # MQTTの設定がある場合だけ送信
+        # DB保存後、MQTTで送信
         try:
             mqtt_sent = send_mqtt(request_data)
         except Exception as error:
@@ -114,6 +129,7 @@ def process_request(data):
 
     except Exception as error:
         print("処理エラー:", error)
+
         return {
             "success": False,
             "message": str(error),
@@ -125,7 +141,6 @@ if __name__ == "__main__":
     test_data = {
         "area": "習志野市",
         "date": "2026-10-11",
-        "time": "14:00",
         "allergies": ["スギ"],
     }
 
