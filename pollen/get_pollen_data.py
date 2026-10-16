@@ -1,7 +1,9 @@
 import requests
-import json
-import config  # APIキー
+import json, os
+from dotenv import load_dotenv  # APIキー
 
+load_dotenv()
+KEY = os.getenv("POLLEN_PAI_KEY")
 
 # 生データ取得
 def get_pollen_data(latitude=35.6812, longitude=139.7671):
@@ -9,7 +11,7 @@ def get_pollen_data(latitude=35.6812, longitude=139.7671):
     url = "https://pollen.googleapis.com/v1/forecast:lookup"
 
     params = {
-        "key": config.API_KEY,
+        "key": KEY,
         "location.latitude": latitude,
         "location.longitude": longitude,
         "days": 1,
