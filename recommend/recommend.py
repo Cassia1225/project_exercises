@@ -16,7 +16,7 @@
     location, date, level, Pollen, weather, Wind, items, reason
 
 使い方:
-    from recommend import recommend
+    from recommend import recommend　紛らわしい。
     response = recommend(request_dict)  # ルールベースのみ。外部通信なし
 
     from llm_advisor import make_gemini_advisor
@@ -24,7 +24,7 @@
     response = recommend(request_dict, advisor=advisor)
 
 役割分担:
-    level（対策レベル）… 常にPythonのルールで確定する
+    level（対策レベル）… 常にPythonのルールで確定する　なにを？
     items（対策文）… Geminiが利用できる場合は生成。失敗時はルールベースに戻す
 """
 from __future__ import annotations
