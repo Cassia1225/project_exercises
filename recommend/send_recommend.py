@@ -87,7 +87,7 @@ def make_no_pollen_response(message):
         "location": message["location"],
         "date": message["date"],
         "level": "判定不可",
-        "Pollen": "指数なし（この日は花粉の予報データがありません）",
+        "Pollen": "指数なし",#（この日は花粉の予報データがありません）
         "weather": weather_text,
         "Wind": wind_text,
         "items": [],
