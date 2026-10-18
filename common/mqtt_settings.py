@@ -1,7 +1,10 @@
 """5つのプログラムが共通で使う、MQTTの設定と小さな便利関数。
 
-接続先（ブローカー）は .env で変えられる。何も書かなければ公開テスト用の
-broker.hivemq.com を使う（誰でも読めるので、秘密の情報は送らないこと）。
+接続先（ブローカー）は .env の MQTT_BROKER で変えられる。
+何も書かなければ、自分のPCで動かしている Mosquitto（localhost）につなぐ。
+
+※ 将来、別々のPCで動かすときは、全員の .env に
+   「Mosquitto を動かしているPCのIPアドレス」を書く（localhost は自分のPCのこと）。
 """
 import json
 import os
@@ -13,7 +16,7 @@ from dotenv import load_dotenv
 # .env ファイルがあれば、その内容を環境変数として読み込む
 load_dotenv()
 
-BROKER = os.getenv("MQTT_BROKER", "broker.hivemq.com")
+BROKER = os.getenv("MQTT_BROKER", "localhost")
 PORT = int(os.getenv("MQTT_PORT", "1883"))
 
 # トピック名の先頭。公開ブローカーで他の班と混ざらないよう、必要なら .env で変える
