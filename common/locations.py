@@ -1,30 +1,71 @@
-"""選べる地域と、その緯度・経度の一覧。
+"""都道府県・市区町村の一覧と、地域名から緯度・経度を調べる処理。
 
-気象APIと花粉APIは「地域名」ではなく「緯度・経度」で指定するため、
-通信制御（server.py）がこの表を使って地域名を座標に変換する。
-座標は各市区役所付近のおおよその値。
+- 一覧（municipalities.json）は、国土地理院の自治体一覧（muni.js）から作ったもの。
+- 緯度・経度は、国土地理院の住所検索で「千葉県習志野市」のように調べる。
+  （気象APIと花粉APIは、地域名ではなく緯度・経度で指定するため）
 """
+import json
+from pathlib import Path
 
-LOCATIONS = {
-    "千葉県 習志野市": (35.6806, 140.0264),
-    "東京都 千代田区": (35.6940, 139.7536),
-    "神奈川県 横浜市": (35.4437, 139.6380),
-    "埼玉県 さいたま市": (35.8617, 139.6455),
-    "宮城県 仙台市": (38.2682, 140.8694),
-    "北海道 札幌市": (43.0618, 141.3545),
-    "愛知県 名古屋市": (35.1815, 136.9066),
-    "大阪府 大阪市": (34.6937, 135.5023),
-    "広島県 広島市": (34.3853, 132.4553),
-    "福岡県 福岡市": (33.5902, 130.4017),
-}
+import requests
+
+# {"北海道": ["札幌市", "札幌市中央区", ...], "青森県": [...], ...}
+with open(Path(__file__).parent / "municipalities.json", encoding="utf-8") as f:
+    MUNICIPALITIES = json.load(f)
+
+PREFECTURES = list(MUNICIPALITIES.keys())  # 北海道〜沖縄県の順
+
+SEARCH_URL = "https://msearch.gsi.go.jp/address-search/AddressSearch"
+
+# 一度調べた住所の座標を覚えておく（同じ地域を何度も問い合わせないため）
+_cache = {}
 
 
-def find_location(name):
-    """地域名から {name, latitude, longitude} を返す。見つからなければ None。"""
-    if name not in LOCATIONS:
+def cities_of(prefecture):
+    """都道府県の市区町村の一覧を返す。"""
+    return MUNICIPALITIES.get(prefecture, [])
+
+
+def search_gsi(address):
+    """国土地理院の住所検索で (緯度, 経度) を調べる。見つからなければ None。"""
+    if address in _cache:
+        return _cache[address]
+
+    res = requests.get(SEARCH_URL, params={"q": address}, timeout=5)
+    res.raise_for_status()
+    results = res.json()
+
+    point = None
+    for feature in results:
+        # 住所が完全に一致する結果を使う（よく似た別の地名を使わないため）
+        if feature["properties"]["title"] == address:
+            longitude, latitude = feature["geometry"]["coordinates"]  # 経度が先なので注意
+            point = (latitude, longitude)
+            break
+
+    _cache[address] = point
+    return point
+
+
+def find_location(name, search=search_gsi):
+    """ "千葉県 習志野市" から {name, latitude, longitude} を返す。
+
+    一覧にない地域や、座標が見つからない場合は None。
+    search はテストのときに偽物の関数と入れ替えられるようにしている。
+    """
+    parts = name.split(" ")
+    if len(parts) != 2:
         return None
 
-    latitude, longitude = LOCATIONS[name]
+    prefecture, city = parts
+    if city not in cities_of(prefecture):
+        return None
+
+    point = search(prefecture + city)
+    if point is None:
+        return None
+
+    latitude, longitude = point
     return {
         "name": name,
         "latitude": latitude,

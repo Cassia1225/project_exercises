@@ -12,7 +12,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from common import mqtt_settings as ms
-from recommend import recommend
+# _weather_display は recommend.py の中の関数（天気コード → 日本語）を借りて使う
+from recommend import recommend, normalize_weather, _weather_display
 
 
 def upi_to_text(upi):
@@ -62,6 +63,56 @@ def make_recommend_input(message):
     }
 
 
+def make_no_pollen_response(message):
+    """花粉の指数が出ていない日（シーズン外など）の結果を作る。
+
+    指数がないのに「少ない」とは言えないので、レベルは「判定不可」にして、
+    取得できた天気と風だけを表示する。status は一部だけ取得できた "partial"。
+    """
+    weather = message.get("weather") or {}
+    code = weather.get("weather_code")
+    wind = weather.get("wind_speed_max")
+
+    if code is None:
+        weather_text = "取得できませんでした"
+    else:
+        weather_text = _weather_display(code, normalize_weather(code))
+
+    if wind is None:
+        wind_text = "取得できませんでした"
+    else:
+        wind_text = f"{wind:g} m/s"
+
+    data = {
+        "location": message["location"],
+        "date": message["date"],
+        "level": "判定不可",
+        "Pollen": "指数なし（この日は花粉の予報データがありません）",
+        "weather": weather_text,
+        "Wind": wind_text,
+        "items": [],
+        "reason": "花粉の指数が提供されていないため、対策レベルは判定できません",
+    }
+    return {
+        "request_id": message["request_id"],
+        "status": "partial",
+        "data": data,
+        "errors": [],
+    }
+
+
+def make_response(message):
+    """依頼1件から、UIへ返す結果を作る。"""
+    pollen = message.get("pollen")
+
+    # 花粉の取得は成功したが、指数が1つも出ていない場合
+    if pollen is not None and pollen.get("upi") is None:
+        return make_no_pollen_response(message)
+
+    # ふつうの場合は、既存の recommend() に任せる
+    return recommend(make_recommend_input(message))
+
+
 def on_connect(client, userdata, flags, reason_code, properties):
     print("ブローカーに接続しました:", reason_code)
     client.subscribe(ms.TOPIC_RECOMMEND_REQUEST, qos=1)
@@ -75,7 +126,7 @@ def on_message(client, userdata, message):
             return
 
         print("依頼を受け取りました:", request["request_id"])
-        response = recommend(make_recommend_input(request))
+        response = make_response(request)
         ms.send_json(client, ms.TOPIC_RECOMMEND_RESULT, response)
         print("結果を返しました:", response["status"])
 

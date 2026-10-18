@@ -31,7 +31,9 @@ def handle_request(request):
         pollen = None
         is_mock = False
 
-    if pollen is None or pollen["upi"] is None:
+    # types が空＝その日のデータ自体がない → 失敗
+    # types はあるが upi が None＝指数が出ていない日（シーズン外など）→ 成功として返す
+    if pollen is None or len(pollen["types"]) == 0:
         reply["status"] = "error"
         reply["data"] = None
     else:

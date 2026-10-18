@@ -13,15 +13,31 @@ from recommend import recommend
 
 # ---------- 地域（通信制御） ----------
 
+def fake_search(address):
+    """国土地理院の住所検索のかわり（テストではネットに接続しない）"""
+    return (35.68166, 140.027267)
+
+
+def test_prefectures_and_cities_are_listed():
+    from common.locations import PREFECTURES, cities_of
+    assert len(PREFECTURES) == 47
+    assert PREFECTURES[0] == "北海道"
+    assert "習志野市" in cities_of("千葉県")
+
+
 def test_find_location_returns_coordinates():
-    place = find_location("千葉県 習志野市")
+    place = find_location("千葉県 習志野市", search=fake_search)
     assert place["name"] == "千葉県 習志野市"
-    assert 35 < place["latitude"] < 36
-    assert 139 < place["longitude"] < 141
+    assert place["latitude"] == 35.68166
+    assert place["longitude"] == 140.027267
 
 
 def test_find_location_unknown_returns_none():
-    assert find_location("どこでもない町") is None
+    # 一覧にない地域は、住所検索を呼ばずに None
+    called = []
+    assert find_location("千葉県 どこでもない町", search=lambda a: called.append(a)) is None
+    assert find_location("習志野市", search=lambda a: called.append(a)) is None
+    assert called == []
 
 
 # ---------- 気象 ----------
@@ -98,7 +114,7 @@ UI_REQUEST = {
 
 
 def test_make_worker_request_has_place_and_date():
-    place = find_location("千葉県 習志野市")
+    place = find_location("千葉県 習志野市", search=fake_search)
     message = make_worker_request(UI_REQUEST, place)
     assert message["request_id"] == "test-001"
     assert message["date"] == "2026-10-20"
@@ -167,3 +183,48 @@ def test_server_ignores_unknown_source():
     server.on_worker_result(None, {"request_id": "x1", "source": "ui_request"})
     assert server.waiting["x1"]["ui_request"] == UI_REQUEST
     server.waiting.clear()
+
+
+# ---------- 花粉の指数が出ていない日（シーズン外など） ----------
+
+def test_format_pollen_data_marks_date_found_even_without_index():
+    raw = {"dailyInfo": [{"date": {"year": 2026, "month": 10, "day": 20},
+                          "pollenTypeInfo": [{"code": "TREE"}, {"code": "GRASS"}]}]}
+    result = format_pollen_data(raw, "2026-10-20")
+    assert result["upi"] is None
+    assert result["types"] == {"TREE": None, "GRASS": None}
+
+
+def test_pollen_worker_returns_success_when_index_is_missing(monkeypatch):
+    import send_pollen
+    monkeypatch.setattr(send_pollen, "get_pollen_info",
+                        lambda lat, lon, d: ({"upi": None, "types": {"TREE": None}}, False))
+    reply = send_pollen.handle_request({"request_id": "p1", "latitude": 35, "longitude": 140, "date": "2026-10-20"})
+    assert reply["status"] == "success"
+    assert reply["data"]["upi"] is None
+
+
+def test_recommend_without_pollen_index_shows_level_unknown():
+    from send_recommend import make_response
+    message = {
+        "request_id": "test-003",
+        "location": "千葉県 習志野市",
+        "date": "2026-10-20",
+        "allergies": [],
+        "weather": {"weather_code": 0, "wind_speed_max": 3.2},
+        "pollen": {"upi": None, "types": {"TREE": None, "GRASS": None}},
+    }
+    response = make_response(message)
+    assert response["status"] == "partial"
+    assert response["data"]["level"] == "判定不可"
+    assert response["data"]["weather"] == "晴れ"
+    assert response["data"]["Wind"] == "3.2 m/s"
+
+
+def test_google_days_counts_from_utc_date():
+    from datetime import date
+    from get_pollen_data import days_needed
+    # 日本の10/19 0時台は、UTCではまだ10/18。Googleの1日目は10/18になる
+    assert days_needed("2026-10-19", utc_today=date(2026, 10, 18)) == 2
+    assert days_needed("2026-10-18", utc_today=date(2026, 10, 18)) == 1
+    assert days_needed("2026-10-30", utc_today=date(2026, 10, 18)) == 5

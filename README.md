@@ -25,7 +25,7 @@ UI(①) ─request→ 通信制御(②) ─┬→ 気象(④)  ─┐
 | ③ 花粉 | `pollen/send_pollen.py`, `pollen/get_pollen_data.py` | Google Pollen APIで花粉指数(UPI)を取得 |
 | ④ 気象 | `weather/send_weather.py`, `weather/get_weather_data.py` | Open-Meteoで天気・風速を取得 |
 | ⑤ 推薦 | `recommend/send_recommend.py`, `recommend/recommend.py` | レベル・対策・理由を決める |
-| 共通 | `common/mqtt_settings.py`, `common/locations.py` | ブローカー・トピック名、地域の座標 |
+| 共通 | `common/mqtt_settings.py`, `common/locations.py`, `common/municipalities.json` | ブローカー・トピック名、都道府県・市区町村の一覧と座標の検索（国土地理院） |
 
 ### 1. 準備（最初の1回）
 
@@ -51,4 +51,6 @@ streamlit run UI/app.py
 - ブローカーの既定は公開テスト用の `broker.hivemq.com` です。誰でも読めるので、秘密の情報は送らないでください。
   自分のPCで動かす場合は Mosquitto を入れて `.env` の `MQTT_BROKER=localhost` にします。
 - `GOOGLE_POLLEN_API_KEY` がないときは花粉がダミーの値になり、画面に「ダミー」と表示されます。
+- 花粉の指数が出ていない日（シーズン外など）は、レベルを「判定不可」にして天気と風だけを表示します。
+- 地域の座標は、通信制御が国土地理院の住所検索で調べます（インターネット接続が必要）。
 - テスト: `python -m pytest -q tests`（推薦のテストは `cd recommend && python -m pytest -q test_recommend.py`）

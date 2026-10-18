@@ -9,7 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # 通信制御へMQTTで検索を依頼する関数と、選べる地域の一覧
 from mqtt_client import ask_server
-from common.locations import LOCATIONS
+from common.locations import PREFECTURES, cities_of
 
 # --- ページ基本設定 ---
 st.set_page_config(
@@ -42,7 +42,15 @@ selected_allergies = st.sidebar.multiselect(
 )
 
 st.sidebar.markdown("---")
-location = st.sidebar.selectbox("地域", list(LOCATIONS.keys()), index=0)
+# 地域は「都道府県」→「市区町村」の順に選ぶ（都道府県を変えると市区町村の一覧も変わる）
+prefecture = st.sidebar.selectbox("都道府県", PREFECTURES, index=PREFECTURES.index("千葉県"))
+cities = cities_of(prefecture)
+if prefecture == "千葉県":
+    first_city = cities.index("習志野市")
+else:
+    first_city = 0
+city = st.sidebar.selectbox("市区町村", cities, index=first_city)
+location = prefecture + " " + city  # 例: "千葉県 習志野市"
 
 today = date.today()
 date_options = {
@@ -67,13 +75,16 @@ if "result" not in st.session_state:
 
 result = st.session_state["result"]
 
-# 失敗したときは、理由を表示してここで終わる
-if result["status"] != "success":
+# 失敗したとき（"success" でも、一部だけ取れた "partial" でもないとき）
+if result["status"] not in ("success", "partial"):
     for error in result.get("errors", []):
         st.error(f"取得できませんでした（{error['source']}）: {error['message']}")
     st.stop()
 
 data = result["data"]
+
+if result["status"] == "partial":
+    st.warning("一部の情報が取得できなかったため、取得できた情報だけを表示しています。")
 
 if result.get("pollen_is_mock"):
     st.warning("花粉データはダミーの値です（GOOGLE_POLLEN_API_KEY が未設定）。")
@@ -129,6 +140,8 @@ st.markdown("""
 # 推薦プログラムが決めた持ち物・行動を、チェック項目として表示する
 for item in data["items"]:
     st.checkbox(item)
+if len(data["items"]) == 0:
+    st.write("対策を決められる情報がありませんでした。")
 
 st.markdown("<br>", unsafe_allow_html=True)
 

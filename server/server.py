@@ -63,7 +63,15 @@ def make_error_reply(request_id, message):
 def on_ui_request(client, request):
     """1. UIから検索の依頼が来たとき"""
     request_id = request["request_id"]
-    place = find_location(request["location"])
+
+    try:
+        place = find_location(request["location"])
+    except Exception as error:
+        # 住所検索（国土地理院）に接続できなかったときなど
+        print("地域の座標を調べられませんでした:", error)
+        reply = make_error_reply(request_id, "地域の座標を調べられませんでした。もう一度お試しください")
+        ms.send_json(client, ms.result_topic_for(request_id), reply)
+        return
 
     if place is None:
         reply = make_error_reply(request_id, "対応していない地域です: " + request["location"])

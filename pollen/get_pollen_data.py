@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -65,6 +65,19 @@ def make_dummy_data():
     return {"upi": 3, "types": {"GRASS": 1, "TREE": 0, "WEED": 3}}
 
 
+def days_needed(target_date, utc_today=None):
+    """target_date まで含めるには、Googleに何日分たのめばよいかを計算する。
+
+    Googleの日付はUTC（世界標準時）で数える。日本の0〜9時はUTCではまだ前日なので、
+    「今日」を日本の日付ではなくUTCの日付で数える。APIの上限は1〜5日。
+    """
+    if utc_today is None:
+        utc_today = datetime.now(timezone.utc).date()
+
+    days = (date.fromisoformat(target_date) - utc_today).days + 1
+    return min(max(days, 1), 5)
+
+
 # 他のから呼ばれるやつ
 def get_pollen_info(latitude, longitude, target_date):
     """(結果の辞書, ダミーかどうか) を返す。"""
@@ -72,10 +85,7 @@ def get_pollen_info(latitude, longitude, target_date):
         print("GOOGLE_POLLEN_API_KEY がないので、ダミーの花粉データを使います")
         return make_dummy_data(), True
 
-    # 例: 今日なら1日分、明後日なら3日分を取る
-    days = (date.fromisoformat(target_date) - date.today()).days + 1
-    days = min(max(days, 1), 5)
-
+    days = days_needed(target_date)
     raw_pollen_data = get_pollen_data(latitude, longitude, days)
     return format_pollen_data(raw_pollen_data, target_date), False
 
