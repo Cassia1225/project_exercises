@@ -30,11 +30,15 @@ UI(①) ─request→ 通信制御(②) ─┬→ 気象(④)  ─┐
 ### 1. 準備（最初の1回）
 
 ```
+python3 -m venv env            # 仮想環境 env を作る
+source env/bin/activate
 python -m pip install -r requirements.txt
-cp .env.example .env   # 必要なら中身を書き換える
+cp .env.example .env           # キーなどは .env にだけ書く（.env.example には書かない）
 ```
 
 ### 2. 起動（ターミナルを5つ開き、リポジトリのルートで1つずつ）
+
+どのターミナルでも、先に `source env/bin/activate` を実行してから起動します。
 
 ```
 python server/server.py
