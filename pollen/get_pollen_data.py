@@ -38,7 +38,7 @@ def format_pollen_data(raw_pollen_data):
     return formatted_data
 
 # 他のから呼ばれるやつ
-def get_pollen_info(latitude=35.6812, longitude=139.7671):
+def get_pollen_info(latitude=-33.8688, longitude=151.2093):
 
     raw_pollen_data = get_pollen_data(latitude, longitude)
 
@@ -48,7 +48,7 @@ def get_pollen_info(latitude=35.6812, longitude=139.7671):
 
 # テスト用
 if __name__ == "__main__":
-    output = get_pollen_data(35.6812, 139.7671)
+    output = get_pollen_data(-33.8688, 151.2093)
     print("テスト結果")
     if output:
         pretty_json = json.dumps(output, indent=2, ensure_ascii=False)
