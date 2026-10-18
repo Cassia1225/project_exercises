@@ -81,9 +81,13 @@ def on_ui_request(client, request):
 
 def on_worker_result(client, result):
     """気象または花粉の結果が来たとき"""
-    request_id = result["request_id"]
+    request_id = result.get("request_id")
     if request_id not in waiting:
         return  # 知らない検索（他の人の検索や、終わった検索）の結果は無視
+
+    # source は "weather" か "pollen" のどちらかだけを受け付ける
+    if result.get("source") not in ("weather", "pollen"):
+        return
 
     entry = waiting[request_id]
     entry[result["source"]] = result  # source は "weather" か "pollen"
@@ -118,17 +122,22 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 
 def on_message(client, userdata, message):
-    data = ms.read_json(message)
-    if data is None:
-        return
+    # おかしなメッセージが1件来ても、プログラム全体が止まらないようにする
+    try:
+        data = ms.read_json(message)
+        if data is None:
+            return
 
-    # どのトピックに届いたかで、処理を分ける
-    if message.topic == ms.TOPIC_REQUEST:
-        on_ui_request(client, data)
-    elif message.topic in (ms.TOPIC_WEATHER_RESULT, ms.TOPIC_POLLEN_RESULT):
-        on_worker_result(client, data)
-    elif message.topic == ms.TOPIC_RECOMMEND_RESULT:
-        on_recommend_result(client, data)
+        # どのトピックに届いたかで、処理を分ける
+        if message.topic == ms.TOPIC_REQUEST:
+            on_ui_request(client, data)
+        elif message.topic in (ms.TOPIC_WEATHER_RESULT, ms.TOPIC_POLLEN_RESULT):
+            on_worker_result(client, data)
+        elif message.topic == ms.TOPIC_RECOMMEND_RESULT:
+            on_recommend_result(client, data)
+
+    except Exception as error:
+        print("メッセージの処理中にエラーが起きたので無視しました:", repr(error))
 
 
 if __name__ == "__main__":

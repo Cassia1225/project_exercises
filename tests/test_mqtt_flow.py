@@ -145,3 +145,25 @@ def test_recommend_input_with_missing_pollen_becomes_error():
     }
     response = recommend(make_recommend_input(message))
     assert response["status"] == "error"
+
+
+# ---------- 壊れた・おかしなメッセージへの備え ----------
+
+class FakeMessage:
+    def __init__(self, text):
+        self.payload = text.encode("utf-8")
+
+
+def test_read_json_ignores_non_dict():
+    from common import mqtt_settings as ms
+    assert ms.read_json(FakeMessage("[1, 2]")) is None
+    assert ms.read_json(FakeMessage("{broken")) is None
+    assert ms.read_json(FakeMessage('{"a": 1}')) == {"a": 1}
+
+
+def test_server_ignores_unknown_source():
+    import server
+    server.waiting["x1"] = {"ui_request": UI_REQUEST, "weather": None, "pollen": None}
+    server.on_worker_result(None, {"request_id": "x1", "source": "ui_request"})
+    assert server.waiting["x1"]["ui_request"] == UI_REQUEST
+    server.waiting.clear()

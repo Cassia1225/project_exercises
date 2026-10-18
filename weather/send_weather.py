@@ -46,14 +46,19 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 
 def on_message(client, userdata, message):
-    request = ms.read_json(message)
-    if request is None:
-        return
+    # おかしなメッセージが1件来ても、プログラム全体が止まらないようにする
+    try:
+        request = ms.read_json(message)
+        if request is None:
+            return
 
-    print("依頼を受け取りました:", request["request_id"], request["date"])
-    reply = handle_request(request)
-    ms.send_json(client, ms.TOPIC_WEATHER_RESULT, reply)
-    print("結果を返しました:", reply["status"])
+        print("依頼を受け取りました:", request["request_id"], request["date"])
+        reply = handle_request(request)
+        ms.send_json(client, ms.TOPIC_WEATHER_RESULT, reply)
+        print("結果を返しました:", reply["status"])
+
+    except Exception as error:
+        print("メッセージの処理中にエラーが起きたので無視しました:", repr(error))
 
 
 if __name__ == "__main__":

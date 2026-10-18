@@ -1,3 +1,4 @@
+import html
 import sys
 from pathlib import Path
 import streamlit as st
@@ -95,7 +96,7 @@ st.markdown(f"""
 st.markdown(f"""
 <div class="warning-card">
     <div class="section-title" style="color: #c85a32;">🚨 {selected_date_label} の花粉警戒度</div>
-    <h2 style="color: #e07a5f; margin: 5px 0; font-weight: bold;">【 {data['level']} 】</h2>
+    <h2 style="color: #e07a5f; margin: 5px 0; font-weight: bold;">【 {html.escape(str(data['level']))} 】</h2>
 </div>
 """, unsafe_allow_html=True)
 
@@ -137,7 +138,7 @@ st.markdown(f"""
 <div class="nature-card">
     <div class="section-title">📝 からだケアのアドバイス</div>
     <p style="color: #526355; line-height: 1.7; margin: 0;">
-        {data['reason']}。<br>
+        {html.escape(str(data['reason']))}。<br>
         帰宅時は玄関前で衣服の花粉を払い、手洗い・うがい・洗顔で目や鼻についた花粉を優しく洗い流しましょう。
     </p>
 </div>

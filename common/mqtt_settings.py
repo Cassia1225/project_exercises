@@ -57,10 +57,15 @@ def send_json(client, topic, data):
 
 
 def read_json(message):
-    """受信したメッセージを辞書(dict)に戻す。壊れたJSONなら None。"""
+    """受信したメッセージを辞書(dict)に戻す。壊れたJSONや辞書でないものは None。"""
     try:
         text = message.payload.decode("utf-8")
-        return json.loads(text)
+        data = json.loads(text)
     except (UnicodeDecodeError, json.JSONDecodeError):
         print("JSONとして読めないメッセージを無視しました")
         return None
+
+    if not isinstance(data, dict):
+        print("辞書の形ではないメッセージを無視しました")
+        return None
+    return data
