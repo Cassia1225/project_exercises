@@ -36,7 +36,16 @@ python -m pip install -r requirements.txt
 cp .env.example .env           # キーなどは .env にだけ書く（.env.example には書かない）
 ```
 
-### 2. 起動（ターミナルを5つ開き、リポジトリのルートで1つずつ）
+### 2. 起動（まとめて起動するのがおすすめ）
+
+```
+source env/bin/activate
+python run_all.py
+```
+
+5つのプログラムを1つのターミナルでまとめて起動します。表示には `[気象]` などの名前が付きます。Ctrl+C を1回押すと全部止まります。
+
+### 2'. 1つずつ起動する場合（ターミナルを5つ開き、リポジトリのルートで1つずつ）
 
 どのターミナルでも、先に `source env/bin/activate` を実行してから起動します。
 
