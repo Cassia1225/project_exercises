@@ -27,6 +27,8 @@ st.markdown("""
     .main-title { color: #2d4a3e; font-weight: 700; text-align: center; margin-bottom: 25px; letter-spacing: 1px; }
     .section-title { color: #3d5a45; font-size: 1.15rem; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; }
     [data-testid="stSidebar"] { background-color: #f0f4ed; }
+    /* 予報詳細データの値が長いとき「...」で切らずに折り返す */
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
 </style>
 """, unsafe_allow_html=True)
 
