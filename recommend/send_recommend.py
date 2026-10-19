@@ -37,8 +37,14 @@ def make_recommend_input(message):
 
     取得に失敗した情報は None のまま渡す（recommend() がエラーとして返す）。
     """
-    weather = message.get("weather") or {}
-    pollen = message.get("pollen") or {}
+    weather = message.get("weather")
+    pollen = message.get("pollen")
+
+    # 取得に失敗していると None なので、空の辞書にしておく（.get が使えるように）
+    if weather is None:
+        weather = {}
+    if pollen is None:
+        pollen = {}
 
     if pollen.get("upi") is None:
         pollen_text = None
@@ -69,7 +75,9 @@ def make_no_pollen_response(message):
     指数がないのに「少ない」とは言えないので、レベルは「判定不可」にして、
     取得できた天気と風だけを表示する。status は一部だけ取得できた "partial"。
     """
-    weather = message.get("weather") or {}
+    weather = message.get("weather")
+    if weather is None:
+        weather = {}
     code = weather.get("weather_code")
     wind = weather.get("wind_speed_max")
 
@@ -81,7 +89,7 @@ def make_no_pollen_response(message):
     if wind is None:
         wind_text = "取得できませんでした"
     else:
-        wind_text = f"{wind:g} m/s"
+        wind_text = str(wind) + " m/s"
 
     data = {
         "location": message["location"],

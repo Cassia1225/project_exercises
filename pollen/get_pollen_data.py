@@ -40,7 +40,8 @@ def format_pollen_data(raw_pollen_data, target_date):
 
     for day_info in raw_pollen_data.get("dailyInfo", []):
         d = day_info["date"]
-        day_text = f"{d['year']:04d}-{d['month']:02d}-{d['day']:02d}"
+        # {"year": 2026, "month": 10, "day": 20} → "2026-10-20" の形にする
+        day_text = date(d["year"], d["month"], d["day"]).isoformat()
         if day_text != target_date:
             continue
 
@@ -51,7 +52,12 @@ def format_pollen_data(raw_pollen_data, target_date):
             else:
                 types[type_info["code"]] = None  # 値なし（0とは区別する）
 
-    values = [v for v in types.values() if v is not None]
+    # 値がある（None ではない）ものだけを集める
+    values = []
+    for value in types.values():
+        if value is not None:
+            values.append(value)
+
     if len(values) == 0:
         upi = None
     else:
@@ -75,7 +81,13 @@ def days_needed(target_date, utc_today=None):
         utc_today = datetime.now(timezone.utc).date()
 
     days = (date.fromisoformat(target_date) - utc_today).days + 1
-    return min(max(days, 1), 5)
+
+    # 1より小さければ1に、5より大きければ5にする
+    if days < 1:
+        days = 1
+    elif days > 5:
+        days = 5
+    return days
 
 
 # 他のから呼ばれるやつ
@@ -93,5 +105,8 @@ def get_pollen_info(latitude, longitude, target_date):
 # テスト用
 if __name__ == "__main__":
     output, is_dummy = get_pollen_info(35.6812, 139.7671, date.today().isoformat())
-    print("テスト結果（ダミー）" if is_dummy else "テスト結果")
+    if is_dummy:
+        print("テスト結果（ダミー）")
+    else:
+        print("テスト結果")
     print(json.dumps(output, indent=2, ensure_ascii=False))
