@@ -71,7 +71,7 @@ def get_pollen_info(latitude, longitude):
 
 # テスト用
 if __name__ == "__main__":
-    output = get_pollen_info(-33.8688, 151.2093)
+    output = get_pollen_data(-33.8688, 151.2093)
     print("テスト結果")
     if output:
         pretty_json = json.dumps(output, indent=2, ensure_ascii=False)
