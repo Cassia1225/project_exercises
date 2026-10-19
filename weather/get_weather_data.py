@@ -25,12 +25,17 @@ def get_weather(latitude, longitude, target_date):
     }
 
     res = requests.get(URL, params=params, timeout=8)
+
+    #HTTPレスポンスのステータスコードをチェック。
+    #requests.exceptions.HTTPErrorを発生させるメソッド
     res.raise_for_status()
     data = res.json()
-
+    
+    #data[daily]は、辞書オブジェクト
+    #target_date : 外部から呼ばれた時、呼び出す。
     return pick_day(data["daily"], target_date)
 
-
+#
 def pick_day(daily, target_date):
     """APIの daily データから、target_date の日の値だけを取り出す。"""
     if target_date not in daily["time"]:

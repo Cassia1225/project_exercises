@@ -64,6 +64,7 @@ def ask_server(location, target_date, allergies, timeout=30):
         except queue.Empty:
             return _error("結果が届きませんでした。5つのプログラムが起動しているか確認してください")
     finally:
+        #ここで通信をきる。
         client.loop_stop()
         client.disconnect()
 

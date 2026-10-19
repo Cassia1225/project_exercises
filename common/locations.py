@@ -64,7 +64,8 @@ def find_location(name, search=search_gsi):
     point = search(prefecture + city)
     if point is None:
         return None
-
+    
+    #分割代入
     latitude, longitude = point
     return {
         "name": name,
