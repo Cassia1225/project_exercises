@@ -1,154 +1,157 @@
+"""② 通信制御プログラム（村岡さん担当）
 
-import json
-import os
-from datetime import date
+全体のまとめ役。MQTTで次の順にメッセージを中継する。
 
-from dotenv import load_dotenv
-from supabase import create_client
-import paho.mqtt.client as mqtt
+  1. UI から検索の依頼を受け取る
+  2. 地域名を緯度・経度に変えて、気象・花粉プログラムへ依頼を送る
+  3. 気象・花粉の両方の結果がそろったら、推薦プログラムへ送る
+  4. 推薦の結果を UI へ返す
 
-# .envから設定を読み込む
-load_dotenv()
+どの検索の結果かは request_id（検索ごとの番号）で見分ける。
 
-# Supabaseの接続設定
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-TABLE_NAME = "outing_requests"
+起動方法（リポジトリのルートで）: python server/server.py
+"""
+import sys
+from pathlib import Path
 
-# MQTTの接続設定
-MQTT_BROKER = os.getenv("MQTT_BROKER")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_TOPIC = "pollen/request"
+# 1つ上のフォルダー（リポジトリのルート）を読み込み先に追加する（common を使うため）
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from common import mqtt_settings as ms
+from common.locations import find_location
+
+# 処理中の検索を request_id ごとに覚えておく辞書
+# 例: {"abc123": {"ui_request": {...}, "weather": None, "pollen": {...}}}
+waiting = {}
 
 
-def validate_request(data):
-    """画面から受け取った入力内容を確認する。"""
-
-    # 地域と日付が入力されているか確認
-    if not data.get("area"):
-        raise ValueError("地域が入力されていません")
-
-    if not data.get("date"):
-        raise ValueError("日付が入力されていません")
-
-    # 日付の形式をチェックする
-    date.fromisoformat(data["date"])
-
-    # アレルギー情報をDBのtext型に合わせる
-    allergies = data.get("allergies", [])
-
-    if isinstance(allergies, list):
-        allergies = ", ".join(allergies)
-
-    # DBに保存するデータを作成
+def make_worker_request(ui_request, place):
+    """気象・花粉プログラムへ送る依頼を作る（アレルギー情報は送らない）。"""
     return {
-    "area": data["area"],
-    "outing_date": data["date"],
-    "allergies": allergies,
-    "status": "received",
+        "request_id": ui_request["request_id"],
+        "location": place["name"],
+        "latitude": place["latitude"],
+        "longitude": place["longitude"],
+        "date": ui_request["date"],
     }
 
 
-def save_to_supabase(request_data):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("Supabaseの接続設定がありません。.envを確認してください")
-
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("Supabaseクライアントを作成しました")
-
-    # 今回はAPIに送るデータを確認
-    print("DBに送るデータ:", request_data)
-
-    print("使用テーブル:", TABLE_NAME)
-    print("送信データのarea:", repr(request_data.get("area")))
-    print("送信データのouting_date:", repr(request_data.get("outing_date")))
-    #supabaseに対してrequest_dataを保存をしている。
-    result = supabase.table(TABLE_NAME).insert(request_data).execute()
-    
-    # 登録結果を呼び出し元へ渡す。
-    return result.data
+def make_recommend_request(ui_request, weather_result, pollen_result):
+    """気象と花粉の結果をまとめて、推薦プログラムへ送る依頼を作る。"""
+    return {
+        "request_id": ui_request["request_id"],
+        "location": ui_request["location"],
+        "date": ui_request["date"],
+        "allergies": ui_request.get("allergies", []),
+        "weather": weather_result["data"],  # 失敗していれば None
+        "pollen": pollen_result["data"],    # 失敗していれば None
+    }
 
 
-def send_mqtt(request_data):
-    """設定されていれば、MQTTで入力内容を送信する。"""
+def send_error_to_ui(client, request_id, message):
+    """UIへエラーを返す（共通仕様の status / errors に合わせる）。"""
+    reply = {
+        "request_id": request_id,
+        "status": "error",
+        "data": None,
+        "errors": [{"source": "server", "code": "INVALID_INPUT", "message": message}],
+    }
+    ms.send_json(client, ms.result_topic_for(request_id), reply)
 
-    # MQTTブローカーが未設定なら送信をスキップ
-    if not MQTT_BROKER:
-        print("MQTT未設定のため、送信をスキップしました")
-        return False
 
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2
-    )
+# ---------- 受け取ったメッセージごとの処理 ----------
+
+def on_ui_request(client, request):
+    """1. UIから検索の依頼が来たとき"""
+    request_id = request["request_id"]
 
     try:
-        # brokerに接続する。裏で処理回す。
-        client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        client.loop_start()
+        place = find_location(request["location"])
+    except Exception as error:
+        # 住所検索（国土地理院）に接続できなかったときなど
+        print("地域の座標を調べられませんでした:", error)
+        send_error_to_ui(client, request_id, "地域の座標を調べられませんでした。もう一度お試しください")
+        return
 
-        info = client.publish(
-            MQTT_TOPIC,
-            json.dumps(request_data, ensure_ascii=False),
-            qos=1,
-        )
-        
-        #送信完了を最大で5秒まつ
-        info.wait_for_publish(timeout=5)
+    if place is None:
+        send_error_to_ui(client, request_id, "対応していない地域です: " + request["location"])
+        return
 
-        if not info.is_published():
-            raise RuntimeError(
-                "MQTTメッセージを送信できませんでした"
-            )
+    waiting[request_id] = {"ui_request": request, "weather": None, "pollen": None}
 
-        return True
-    
-    #最後は通信終了
-    finally:
-        client.loop_stop()
-        client.disconnect()
+    # 2. 気象と花粉へ、同じ内容の依頼を同時に送る
+    worker_request = make_worker_request(request, place)
+    ms.send_json(client, ms.TOPIC_WEATHER_REQUEST, worker_request)
+    ms.send_json(client, ms.TOPIC_POLLEN_REQUEST, worker_request)
+    print("気象・花粉へ依頼しました:", request_id)
 
 
-def process_request(data):
-    """入力を受け取り、DBに保存して、MQTTで送信する。"""
+def on_worker_result(client, result):
+    """気象または花粉の結果が来たとき"""
+    request_id = result.get("request_id")
+    if request_id not in waiting:
+        return  # 知らない検索（他の人の検索や、終わった検索）の結果は無視
 
+    # source は "weather" か "pollen" のどちらかだけを受け付ける
+    if result.get("source") not in ("weather", "pollen"):
+        return
+
+    entry = waiting[request_id]
+    entry[result["source"]] = result  # source は "weather" か "pollen"
+
+    # 3. 両方そろったら、推薦プログラムへ送る
+    if entry["weather"] is not None and entry["pollen"] is not None:
+        message = make_recommend_request(entry["ui_request"], entry["weather"], entry["pollen"])
+        ms.send_json(client, ms.TOPIC_RECOMMEND_REQUEST, message)
+        print("推薦へ依頼しました:", request_id)
+
+
+def on_recommend_result(client, response):
+    """4. 推薦の結果が来たとき → UIへ返す"""
+    request_id = response["request_id"]
+    if request_id not in waiting:
+        return
+
+    entry = waiting.pop(request_id)  # この検索はこれで終わりなので、辞書から消す
+    response["pollen_is_mock"] = entry["pollen"].get("is_mock", False)
+    ms.send_json(client, ms.result_topic_for(request_id), response)
+    print("UIへ結果を返しました:", request_id, response["status"])
+
+
+# ---------- MQTTの設定 ----------
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    print("ブローカーに接続しました:", reason_code)
+    client.subscribe(ms.TOPIC_REQUEST, qos=1)
+    client.subscribe(ms.TOPIC_WEATHER_RESULT, qos=1)
+    client.subscribe(ms.TOPIC_POLLEN_RESULT, qos=1)
+    client.subscribe(ms.TOPIC_RECOMMEND_RESULT, qos=1)
+
+
+def on_message(client, userdata, message):
+    # おかしなメッセージが1件来ても、プログラム全体が止まらないようにする
     try:
-        # 入力内容を確認
-        request_data = validate_request(data)
-        print("送信するデータ:", request_data)
+        data = ms.read_json(message)
+        if data is None:
+            return
 
-        # まずDBに保存
-        saved_data = save_to_supabase(request_data)
-
-        # DB保存後、MQTTで送信
-        try:
-            mqtt_sent = send_mqtt(request_data)
-        except Exception as error:
-            print("MQTT送信エラー:", error)
-            mqtt_sent = False
-
-        return {
-            "success": True,
-            "message": "入力を受け取りました",
-            "saved_data": saved_data,
-            "mqtt_sent": mqtt_sent,
-        }
+        # どのトピックに届いたかで、処理を分ける
+        if message.topic == ms.TOPIC_REQUEST:
+            on_ui_request(client, data)
+        elif message.topic in (ms.TOPIC_WEATHER_RESULT, ms.TOPIC_POLLEN_RESULT):
+            on_worker_result(client, data)
+        elif message.topic == ms.TOPIC_RECOMMEND_RESULT:
+            on_recommend_result(client, data)
 
     except Exception as error:
-        print("処理エラー:", error)
-
-        return {
-            "success": False,
-            "message": str(error),
-        }
+        print("メッセージの処理中にエラーが起きたので無視しました:", repr(error))
 
 
 if __name__ == "__main__":
-    # 動作確認用のサンプルデータ
-    test_data = {
-        "area": "習志野市",
-        "date": "2026-10-11",
-        "allergies": ["スギ"],
-    }
+    client = ms.create_client("server")
+    client.on_connect = on_connect
+    client.on_message = on_message
 
-    result = process_request(test_data)
-    print(result)
+    client.connect(ms.BROKER, ms.PORT, 60)
+    print("通信制御プログラムを起動しました。止めるときは Ctrl+C")
+    client.loop_forever()
