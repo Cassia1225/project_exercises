@@ -48,14 +48,15 @@ def make_recommend_request(ui_request, weather_result, pollen_result):
     }
 
 
-def make_error_reply(request_id, message):
-    """UIへ返すエラーの形（共通仕様の status / errors に合わせる）。"""
-    return {
+def send_error_to_ui(client, request_id, message):
+    """UIへエラーを返す（共通仕様の status / errors に合わせる）。"""
+    reply = {
         "request_id": request_id,
         "status": "error",
         "data": None,
         "errors": [{"source": "server", "code": "INVALID_INPUT", "message": message}],
     }
+    ms.send_json(client, ms.result_topic_for(request_id), reply)
 
 
 # ---------- 受け取ったメッセージごとの処理 ----------
@@ -69,13 +70,11 @@ def on_ui_request(client, request):
     except Exception as error:
         # 住所検索（国土地理院）に接続できなかったときなど
         print("地域の座標を調べられませんでした:", error)
-        reply = make_error_reply(request_id, "地域の座標を調べられませんでした。もう一度お試しください")
-        ms.send_json(client, ms.result_topic_for(request_id), reply)
+        send_error_to_ui(client, request_id, "地域の座標を調べられませんでした。もう一度お試しください")
         return
 
     if place is None:
-        reply = make_error_reply(request_id, "対応していない地域です: " + request["location"])
-        ms.send_json(client, ms.result_topic_for(request_id), reply)
+        send_error_to_ui(client, request_id, "対応していない地域です: " + request["location"])
         return
 
     waiting[request_id] = {"ui_request": request, "weather": None, "pollen": None}
