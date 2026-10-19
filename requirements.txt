@@ -1,4 +1,5 @@
-streamlit
-python-dotenv
-supabase
-paho-mqtt
+streamlit==1.65.0
+python-dotenv>=1.2,<2
+requests>=2.32.4,<3
+paho-mqtt==2.1.0
+amqtt==0.12.1

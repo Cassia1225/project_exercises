@@ -27,10 +27,11 @@
     level（対策レベル）… 常にPythonのルールで確定する　なにを？
     items（対策文）… Geminiが利用できる場合は生成。失敗時はルールベースに戻す
 """
-from __future__ import annotations
+from __future__ import annotations #Typescriptのように、型を明示的にしめすことのできるもの。
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -42,7 +43,6 @@ Advisor = Callable[[Dict[str, Any]], List[str]]
 
 SCHEMA_VERSION = "1.0"
 
-POLLEN_NUMERIC_SCALE = "count"
 # 風速の閾値 (m/s): 未満=calm / 未満=moderate / 以上=strong
 WIND_CALM_MAX = 3.0
 WIND_STRONG_MIN = 7.0
@@ -118,21 +118,14 @@ def _is_number_like(raw: Any) -> bool:
 
 
 def _pollen_from_number(v: float) -> str:
-    if v < 0:
-        raise InputError("pollen", "INVALID_VALUE", f"花粉量が負の値です: {v}")
-    if POLLEN_NUMERIC_SCALE == "upi":  # 0〜5段階
-        if v <= 1:
-            return "low"
-        if v <= 3:
-            return "medium"
-        if v <= 4:
-            return "high"
-        return "very_high"
-    if v < 20:
+    """UPI 0〜5をアプリの4段階へ変換する。"""
+    if not math.isfinite(v) or not v.is_integer() or not 0 <= v <= 5:
+        raise InputError("pollen", "INVALID_VALUE", f"UPIは0〜5の整数で指定してください: {v}")
+    if v <= 1:
         return "low"
-    if v < 50:
+    if v <= 3:
         return "medium"
-    if v < 80:
+    if v == 4:
         return "high"
     return "very_high"
 
@@ -141,7 +134,11 @@ def normalize_pollen(raw: Any) -> str:
     """花粉量を 'low' / 'medium' / 'high' / 'very_high' に正規化する。
     解釈できない値は黙って medium にせず InputError を投げる。"""
     if _is_number_like(raw):
-        return _pollen_from_number(float(raw))
+        try:
+            value = float(raw)
+        except OverflowError as exc:
+            raise InputError("pollen", "INVALID_VALUE", "UPIは0〜5の整数で指定してください") from exc
+        return _pollen_from_number(value)
     if isinstance(raw, str):
         s = raw.strip().lower()
         if s in _POLLEN_SHORT:
@@ -259,14 +256,12 @@ def evaluate(
     reasons = [f"花粉の飛散量が「{_POLLEN_JP[pollen_cat]}」"]
 
     if wind_cat == "strong":
-        score += 1
         reasons.append("風が強く、花粉が拡散しやすい")
     if weather_cat == "clear":
         reasons.append("晴れの時間帯があり、花粉が飛散しやすい")
     elif weather_cat == "rain":
         reasons.append("雨で空中の花粉は減る可能性があるが、衣服に付着しやすい")
     if matched_allergies:
-        score += 1
         reasons.append(f"登録アレルギー（{'、'.join(matched_allergies)}）の飛散が見込まれる")
 
     idx = min(max(score, 0), len(LEVELS) - 1)
@@ -373,13 +368,6 @@ def _upstream_errors(request: Dict[str, Any]) -> List[Dict[str, str]]:
         for e in errors
         if isinstance(e, dict)
     ]
-
-
-def _require(payload: Dict[str, Any], key: str, label: str) -> Any:
-    value = payload.get(key)
-    if value is None or (isinstance(value, str) and not value.strip()):
-        raise InputError(key, "MISSING_DATA", f"{label}がありません")
-    return value
 
 
 def _require_any(payload: Dict[str, Any], keys: List[str], label: str) -> Any:

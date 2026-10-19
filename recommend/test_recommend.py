@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_advisor import make_advisor, make_gemini_advisor, parse_items
-from recommend import UserProfile, recommend
+from recommend.llm_advisor import make_advisor, make_gemini_advisor, parse_items
+from recommend.recommend import UserProfile, recommend
 
 SAMPLE = {
     "request_id": "req-001",
@@ -74,7 +74,7 @@ def test_minimal_context_does_not_include_location_or_user_id():
     req = dict(SAMPLE, user={"user_id": "secret-uid", "allergies": ["ブタクサ", "謎の花"]})
     recommend(req, advisor=advisor)
     sent = json.dumps(seen, ensure_ascii=False)
-    assert seen["level"] == "非常に高い"
+    assert seen["level"] == "高"
     assert seen["matched_allergies"] == ["ブタクサ"]
     assert seen["base_items"][0] == "マスクを着用する"
     assert "習志野" not in sent
@@ -180,7 +180,7 @@ def test_make_advisor_remains_provider_agnostic():
 
 @pytest.mark.parametrize(("code", "expected"), [(0, "clear"), (3, "other"), (61, "rain"), (71, "rain"), (95, "rain")])
 def test_open_meteo_weather_code(code, expected):
-    from recommend import normalize_weather
+    from recommend.recommend import normalize_weather
     assert normalize_weather(code) == expected
 
 
@@ -188,3 +188,50 @@ def test_numeric_open_meteo_weather_code_is_displayed_in_japanese():
     req = dict(SAMPLE, weather=0)
     res = recommend(req)
     assert res["data"]["weather"] == "晴れ"
+
+
+@pytest.mark.parametrize(("upi", "category", "level"), [
+    (0, "low", "低"), (1, "low", "低"),
+    (2, "medium", "中"), (3, "medium", "中"),
+    (4, "high", "高"), (5, "very_high", "非常に高い"),
+])
+def test_upi_boundaries(upi, category, level):
+    from recommend.recommend import normalize_pollen
+    assert normalize_pollen(upi) == category
+    request = dict(SAMPLE, Pollen=upi, Wind=1, pollen_types=[])
+    response = recommend(request)
+    assert response["status"] == "success"
+    assert response["data"]["level"] == level
+
+
+@pytest.mark.parametrize("raw", [
+    -1, 6, 2.5, True, False, None, float("nan"), float("inf"),
+    pytest.param(10 ** 309, id="large-positive-integer"),
+    pytest.param(-(10 ** 309), id="large-negative-integer"),
+])
+def test_invalid_upi_is_rejected(raw):
+    from recommend.recommend import InputError, normalize_pollen
+    with pytest.raises(InputError):
+        normalize_pollen(raw)
+    response = recommend(dict(SAMPLE, Pollen=raw))
+    assert response["status"] == "error"
+    assert response["data"] is None
+
+
+@pytest.mark.parametrize(("pollen_category", "expected_level"), [
+    ("low", "低"), ("medium", "中"), ("high", "高"), ("very_high", "非常に高い"),
+])
+@pytest.mark.parametrize("wind_category", ["calm", "moderate", "strong"])
+@pytest.mark.parametrize("matched_allergies", [[], ["スギ"]])
+@pytest.mark.parametrize("weather_category", ["clear", "rain"])
+def test_level_depends_only_on_pollen(pollen_category, expected_level, wind_category, matched_allergies, weather_category):
+    from recommend.recommend import evaluate
+    result = evaluate(pollen_category, wind_category, weather_category, matched_allergies)
+    assert result["level"] == expected_level
+
+
+def test_recommend_keeps_low_upi_low_in_strong_wind():
+    request = dict(SAMPLE, Pollen=1, Wind=9, pollen_types=["tree"], user={"allergies": ["スギ"]})
+    response = recommend(request)
+    assert response["status"] == "success"
+    assert response["data"]["level"] == "低"

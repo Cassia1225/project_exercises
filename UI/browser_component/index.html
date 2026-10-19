@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body {
+      margin: 0;
+      font: 14px system-ui, sans-serif;
+      color: #30343b;
+    }
+    button {
+      font: inherit;
+      padding: 8px 12px;
+      border: 1px solid #aeb8bd;
+      border-radius: 7px;
+      background: white;
+      cursor: pointer;
+      margin: 4px 8px 4px 0;
+    }
+    button:disabled {
+      opacity: .5;
+      cursor: wait;
+    }
+    #status {
+      font-size: 12px;
+      min-height: 18px;
+      margin: 4px 0;
+      color: #566168;
+    }
+  </style>
+</head>
+<body>
+  <button id="locate" type="button">現在地から市区町村を選ぶ</button>
+  <button id="clear" type="button">保存したアレルギー設定を削除</button>
+  <p id="status" role="status">設定を読み込んでいます…</p>
+
+  <script>
+    // このアプリのアレルギー設定だけを保存する名前。
+    const KEY = 'pollen-navi.settings.v1';
+    let initialized = false;
+    let awaitingAck = null;
+    let lastProfile = '';
+    let storageOK = true;
+    const status = document.getElementById('status');
+
+    // ブラウザーから、親画面のStreamlitへ通知する。
+    function send(type, extra = {}) {
+      parent.postMessage({isStreamlitMessage: true, type, ...extra}, '*');
+    }
+
+    function emit(kind, data = {}) {
+      const id = crypto.randomUUID();
+      awaitingAck = id;
+      send('streamlit:setComponentValue', {
+        value: {id, kind, ...data},
+        dataType: 'json'
+      });
+    }
+
+    function resize() {
+      send('streamlit:setFrameHeight', {
+        height: Math.max(90, document.body.scrollHeight + 5)
+      });
+    }
+
+    // 1. Streamlitから表示用の設定が届いたとき。
+    window.addEventListener('message', event => {
+      if (event.source !== parent || event.data.type !== 'streamlit:render') {
+        return;
+      }
+      const args = event.data.args || {};
+
+      // 初回は、このブラウザーに前回保存した設定を読み込む。
+      if (!initialized) {
+        initialized = true;
+        let profile = null;
+        try {
+          const raw = localStorage.getItem(KEY);
+          try {
+            if (raw === null) {
+              profile = null;
+            } else {
+              profile = JSON.parse(raw);
+            }
+          } catch (error) {
+            profile = null;
+          }
+        } catch (error) {
+          storageOK = false;
+        }
+
+        let initialProfile = profile;
+        if (profile === null) {
+          initialProfile = {
+            version: 1,
+            allergy_state: 'unknown',
+            allergies: []
+          };
+        }
+        lastProfile = JSON.stringify(initialProfile);
+        if (storageOK) {
+          status.textContent = '設定の変更は、このブラウザーに自動保存されます。';
+        } else {
+          status.textContent = '設定を保存できません。今回の検索は利用できます。';
+        }
+        emit('loaded', {profile, storage_ok: storageOK});
+        resize();
+        return;
+      }
+
+      // Pythonが復元・削除を反映するまでは、古い設定で上書きしない。
+      if (awaitingAck && args.ack_event !== awaitingAck) {
+        resize();
+        return;
+      }
+      awaitingAck = null;
+      if (args.settings_ready && storageOK) {
+        const serialized = JSON.stringify(args.profile);
+        if (serialized !== lastProfile) {
+          try {
+            localStorage.setItem(KEY, serialized);
+            lastProfile = serialized;
+            emit('saved', {storage_ok: true});
+          } catch (error) {
+            storageOK = false;
+            status.textContent = '設定を保存できません。今回の検索は利用できます。';
+            emit('storage_error');
+          }
+        }
+      }
+      resize();
+    });
+
+    // 2. 保存設定の削除ボタンを押したとき。
+    document.getElementById('clear').addEventListener('click', () => {
+      try {
+        localStorage.removeItem(KEY);
+        lastProfile = JSON.stringify({
+          version: 1,
+          allergy_state: 'unknown',
+          allergies: []
+        });
+        emit('deleted', {storage_ok: true});
+        status.textContent = '保存設定を削除しました。';
+      } catch (error) {
+        storageOK = false;
+        emit('storage_error');
+      }
+    });
+
+    // 3. 現在地のボタンを押したとき。座標は保存せず、Pythonへ通知する。
+    document.getElementById('locate').addEventListener('click', () => {
+      const button = document.getElementById('locate');
+      if (!navigator.geolocation) {
+        emit('geo_error', {
+          message: '現在地取得に対応していません。都道府県と市区町村を選択してください。'
+        });
+        return;
+      }
+      button.disabled = true;
+      status.textContent = '現在地を取得しています…';
+      navigator.geolocation.getCurrentPosition(
+        position => {
+          button.disabled = false;
+          status.textContent = '取得した位置から市区町村を確認しています。';
+          emit('geo', {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy_m: position.coords.accuracy,
+            captured_at: new Date(position.timestamp).toISOString()
+          });
+        },
+        error => {
+          button.disabled = false;
+          let message = '現在地を取得できませんでした。都道府県と市区町村を選択してください。';
+          if (error.code === 1) {
+            message = '位置情報の利用が許可されませんでした。都道府県と市区町村を選択してください。';
+          }
+          status.textContent = message;
+          emit('geo_error', {message});
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    });
+
+    send('streamlit:componentReady', {apiVersion: 1});
+    resize();
+  </script>
+</body>
+</html>
