@@ -21,9 +21,11 @@ PROGRAMS = [
 # -u は、print の表示をためずにすぐ出す指定（ないとログが遅れて出る）
 processes = []
 for program in PROGRAMS:
+    #起動したプログラムを操作するためのオブジェクトを保存。停止に使う。
     processes.append(subprocess.Popen([sys.executable, "-u", program]))
 
-time.sleep(2)  # 4つがブローカーにつながるのを待ってから、UIを起動する
+# 4つがブローカーにつながるのを2秒待ってから、UIを起動する
+time.sleep(2)
 processes.append(subprocess.Popen([sys.executable, "-m", "streamlit", "run", "UI/app.py"]))
 
 print("5つのプログラムを起動しました。止めるときは Ctrl+C")
@@ -35,7 +37,7 @@ try:
 except KeyboardInterrupt:
     # 5つすべてに「止まって」と合図し、止まるのを待つ
     for process in processes:
-        process.terminate()
+        process.terminate()#終了を要求する。
     for process in processes:
-        process.wait()
+        process.wait()#それぞれの終了を待つ
     print("すべて停止しました")
