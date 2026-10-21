@@ -16,7 +16,9 @@
     location, date, level, Pollen, weather, Wind, items, reason
 
 使い方:
-    from recommend import recommend　紛らわしい。
+=======
+    from recommend import recommend 紛らわしい。
+>>>>>>> origin/feature/logic:recommend.py
     response = recommend(request_dict)  # ルールベースのみ。外部通信なし
 
     from llm_advisor import make_gemini_advisor
@@ -24,7 +26,9 @@
     response = recommend(request_dict, advisor=advisor)
 
 役割分担:
-    level（対策レベル）… 常にPythonのルールで確定する　なにを？
+=======
+    level（対策レベル）
+>>>>>>> origin/feature/logic:recommend.py
     items（対策文）… Geminiが利用できる場合は生成。失敗時はルールベースに戻す
 """
 import json
@@ -479,7 +483,6 @@ def _weather_display(raw, category):
 def recommend(request, user=None, include_reasons=False, advisor=None):
     """推薦のメイン関数。例外は投げず、必ずプロトコルの dict を返す。
 
-    対策レベル(level)は常にPythonのルールで決める。
     advisor（生成AIに文脈を送って対策文を返す関数）を渡すと、items をAIが作る。
     advisor が失敗したり、返答が検証を通らなかった場合は、ルールベースの items に戻す。
     advisor=None なら外部通信は一切しない。
@@ -560,7 +563,8 @@ def recommend(request, user=None, include_reasons=False, advisor=None):
     # 入力の「day」は共通仕様の「date」に統一して返す。
     data = {
         "location": payload.get("location"),
-        "date": day,
+        "day": day,
+
         "level": result["level"],
         "Pollen": pollen_text,
         "weather": _weather_display(weather_raw, weather_cat),
@@ -582,6 +586,8 @@ def recommend(request, user=None, include_reasons=False, advisor=None):
 # サンプル実行: python recommend.py
 
 if __name__ == "__main__":
+    from llm_advisor import make_gemini_advisor
+
     sample = {
         "request_id": "req-001",
         "location": "千葉県習志野市",
@@ -590,10 +596,23 @@ if __name__ == "__main__":
         "weather": "おおむね晴れ〜一部曇り",
         "Wind": "最大5.1 m/s",
     }
-    weather_failed = {
-        "request_id": "req-001",
-        "status": "error",
-        "errors": [{"source": "weather", "code": "API_ERROR", "message": "気象情報を取得できませんでした"}],
-    }
-    for req in (sample, weather_failed):
-        print(json.dumps(recommend(req), ensure_ascii=False, indent=2))
+
+
+    try:
+        # Gemini APIを使用するための関数を作成
+        advisor = make_gemini_advisor()
+
+        # Geminiを使って対策文を生成
+       
+        result = recommend(sample, advisor=advisor)
+
+        print(json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2
+        ))
+
+    except Exception as e:
+        print("Gemini APIの準備に失敗しました")
+        print(type(e).__name__, str(e))
+

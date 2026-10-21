@@ -70,7 +70,7 @@ def make_advisor(call_llm, cache_size=128):
     return advisor
 
 
-def make_gemini_advisor(model=DEFAULT_MODEL, client=None, api_key=None, max_output_tokens=500):
+def make_gemini_advisor(model=DEFAULT_MODEL, client=None, api_key=None, max_output_tokens=1500):
     """Gemini API用 advisor。client はテスト時に差し替え可能。"""
     if client is None:
         try:
@@ -91,7 +91,9 @@ def make_gemini_advisor(model=DEFAULT_MODEL, client=None, api_key=None, max_outp
         client = genai.Client(api_key=key)
 
     def call_llm(system, user_json):
+        print("【確認】Gemini APIの呼び出し処理に入りました")
         response = client.models.generate_content(
+            
             model=model,
             contents=user_json,
             config={
@@ -99,11 +101,29 @@ def make_gemini_advisor(model=DEFAULT_MODEL, client=None, api_key=None, max_outp
                 "response_mime_type": "application/json",
                 "temperature": 0.2,
                 "max_output_tokens": max_output_tokens,
+                "response_schema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "items": {
+                            "type": "ARRAY",
+                            "items": {"type": "STRING"},
+                            "minItems": 1,
+                            "maxItems": 6,
+                        }
+                    },
+                    "required": ["items"],
+                },
             },
         )
         text = getattr(response, "text", None)  # response.text を読む（なければ None）
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Geminiから有効なテキスト応答がありませんでした")
+        if os.getenv("GEMINI_DEBUG") == "1":
+            print("[Gemini raw response]", repr(text))
+            print("[Gemini finish_reason]", [
+                str(getattr(c, "finish_reason", None))
+                for c in (getattr(response, "candidates", None) or [])
+            ])
         return text
 
     return make_advisor(call_llm)
