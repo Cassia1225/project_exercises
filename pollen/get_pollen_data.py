@@ -4,7 +4,7 @@ import config  # APIキー
 
 
 # 生データ取得
-def get_pollen_data(latitude=35.6812, longitude=139.7671):
+def get_pollen_data(latitude, longitude):
 
     url = "https://pollen.googleapis.com/v1/forecast:lookup"
 
@@ -12,7 +12,7 @@ def get_pollen_data(latitude=35.6812, longitude=139.7671):
         "key": config.API_KEY,
         "location.latitude": latitude,
         "location.longitude": longitude,
-        "days": 1,
+        "days": 5,
         "languageCode": "ja",
         "plantsDescription": True
     }
@@ -28,42 +28,75 @@ def get_pollen_data(latitude=35.6812, longitude=139.7671):
         return None
 
 # データ成型
-def format_pollen_data(raw_pollen_data):
+def format_pollen_data(raw_pollen_data, target_day):
 
-    # 花粉対策レベルが最も高い種類の植物の情報のみを抽出
-    plants = raw_pollen_data["dailyInfo"][0]["pollenTypeInfo"]
-    max_value = -1
-    selected = None
-    for plant in plants:
-        val = plant["indexInfo"].get("value", 0)
-        if val > max_value:
-            max_value = val
-            selected = plant
+    # 一致する日付を探す
+    matched_day = None
+    for day in raw_pollen_data.get("dailyInfo", []):
+        d = day.get("date", {})
+        date_str = f"{d.get('year')}-{d.get('month'):02d}-{d.get('day'):02d}"
 
-    index_info = selected.get("indexInfo")
-    if index_info:
-        formatted_data = {
-            "level": index_info.get("category"),
-            "pollen": selected.get("displayName"),
-            # "recommend": selected.get("healthRecommendations")
-        }
-    else:
-        formatted_data = {
-            "level": None,
-            "pollen": selected.get("displayName"),
-            # "recommend": selected.get("healthRecommendations")
-        }
+        if date_str == target_day:
+            matched_day = day
+            break
 
-    return formatted_data
+    if not matched_day:
+        return {"error": "DATE_UNAVAILABLE"}
+
+    # typesの整形
+    types_list = []
+    for p_type in matched_day.get("pollenTypeInfo", []):
+        code = p_type.get("code")
+        index_info = p_type.get("indexInfo")
+
+        if index_info and "value" in index_info:
+            upi = index_info["value"]
+            availability = "available"
+        else:
+            upi = None
+            availability = "missing"
+
+        types_list.append({
+            "code": code,
+            "upi": upi,
+            "availability": availability
+        })
+
+    # plantsの整形
+    plants_list = []
+    for plant in matched_day.get("plantInfo", []):
+        code = plant.get("code")
+        index_info = plant.get("indexInfo")
+
+        if index_info and "value" in index_info:
+            upi = index_info["value"]
+            availability = "available"
+        else:
+            upi = None
+            availability = "missing"
+
+        plants_list.append({
+            "code": code,
+            "upi": upi,
+            "availability": availability
+        })
+
+    return {
+        "provider_date": target_day,
+        "provider_timezone": "UTC",
+        "region_code": raw_pollen_data.get("regionCode"),
+        "types": types_list,
+        "plants": plants_list
+    }
 
 # 他のから呼ばれるやつ
-def get_pollen_info(latitude, longitude):
+def get_pollen_info(latitude, longitude, target_day):
 
     raw_pollen_data = get_pollen_data(latitude, longitude)
 
     if raw_pollen_data != None:
 
-        result = format_pollen_data(raw_pollen_data)
+        result = format_pollen_data(raw_pollen_data, target_day)
 
         return result
     else:
@@ -76,5 +109,12 @@ if __name__ == "__main__":
     if output:
         pretty_json = json.dumps(output, indent=2, ensure_ascii=False)
         print(pretty_json)
+
+        first_day_date = output["dailyInfo"][0]["date"]
+        target_date = f"{first_day_date['year']}-{first_day_date['month']:02d}-{first_day_date['day']:02d}"
+
+        formated = format_pollen_data(output, target_date)
+        formated_json = json.dumps(formated, indent=2, ensure_ascii=False)
+        print(formated_json)
     else:
-        print("\n失敗")
+        print("\n取得失敗")
