@@ -1,0 +1,8 @@
+.env
+test_supabase.py
+memo.txt
+__pycache__/
+.pytest_cache/
+.claude/
+.pytest_cache/
+.gitignore
