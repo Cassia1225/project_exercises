@@ -35,7 +35,8 @@ def make_worker_request(ui_request, place):
         "date": ui_request["date"],
     }
 
-
+#uiからのロケーションやid、日にちといった情報をここで受け取る。
+#その他に、weatherやpollenからの情報もここで受け取る。
 def make_recommend_request(ui_request, weather_result, pollen_result):
     """気象と花粉の結果をまとめて、推薦プログラムへ送る依頼を作る。"""
     return {
@@ -67,6 +68,9 @@ def on_ui_request(client, request):
 
     try:
         place = find_location(request["location"])
+    except ValueError as error:
+        send_error_to_ui(client, request_id, str(error))
+        return
     except Exception as error:
         # 住所検索（国土地理院）に接続できなかったときなど
         print("地域の座標を調べられませんでした:", error)
@@ -77,6 +81,9 @@ def on_ui_request(client, request):
         send_error_to_ui(client, request_id, "対応していない地域です: " + request["location"])
         return
 
+    # 地域検索で確定した都市名を、推薦結果と画面にも渡す
+    request = dict(request)
+    request["location"] = place["name"]
     waiting[request_id] = {"ui_request": request, "weather": None, "pollen": None}
 
     # 2. 気象と花粉へ、同じ内容の依頼を同時に送る

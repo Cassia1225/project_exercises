@@ -66,11 +66,22 @@ streamlit run UI/app.py
 
 ブラウザーで地域と日程を選び「対策を調べる」を押すと結果が出ます。止めるときは各ターミナルで Ctrl+C。
 
+### 複数のPCで担当を分けて動かす場合
+
+従来の `python run_all.py` と `.env` は、1台で動かす方法として引き続き使えます。
+各自のPCで動かす場合は、別の `.env.lan` に共通Brokerの接続先を設定して、自分の担当だけを起動します。
+
+```bash
+python run_role.py weather --env-file .env.lan
+```
+
+`weather` を `ui`・`server`・`pollen`・`recommend` に変えると、その担当だけが起動します。
+[複数PCで動かす手順](docs/mqtt-multiple-pcs.md)に、Mac・Windowsの準備、Broker、設定、起動順、確認方法をまとめています。
+
 ### 注意
 
-- ブローカーは自分のPCの Mosquitto（`localhost`）を使います。
-- 将来、別々のPCで動かす場合は、全員の `.env` の `MQTT_BROKER` を Mosquitto を動かすPCのIPアドレスにし、
-  そのPCの Mosquitto で外部からの接続を許可する設定（`listener 1883` など）が必要です。
+- 1台で動かす場合のブローカーは、自分のPCの Mosquitto（`localhost:1883`）です。
+- 複数PC用の設定例は別ポート `1884` を使います。全員の接続先をそろえ、各担当は1つずつ起動します。
 - `GOOGLE_POLLEN_API_KEY` がないときは花粉がダミーの値になり、画面に「ダミー」と表示されます。
 - 花粉の指数が出ていない日（シーズン外など）は、レベルを「判定不可」にして天気と風だけを表示します。
 - 地域の座標は、通信制御が国土地理院の住所検索で調べます（インターネット接続が必要）。

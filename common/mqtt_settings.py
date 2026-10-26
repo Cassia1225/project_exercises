@@ -3,7 +3,7 @@
 接続先（ブローカー）は .env の MQTT_BROKER で変えられる。
 何も書かなければ、自分のPCで動かしている Mosquitto（localhost）につなぐ。
 
-※ 将来、別々のPCで動かすときは、全員の .env に
+※ 別々のPCで動かすときは、全員の .env.lan に
    「Mosquitto を動かしているPCのIPアドレス」を書く（localhost は自分のPCのこと）。
 """
 import json
@@ -16,11 +16,17 @@ from dotenv import load_dotenv
 # .env ファイルがあれば、その内容を環境変数として読み込む
 load_dotenv()
 
-BROKER = os.getenv("MQTT_BROKER", "localhost")
-PORT = int(os.getenv("MQTT_PORT", "1883"))
+#右端の引数は、デフォルト引数
+BROKER = os.getenv("MQTT_BROKER", default="localhost")
+PORT = int(os.getenv("MQTT_PORT", default="1883"))
+
+# 複数PC用Brokerでパスワードを使う場合だけ設定する。
+# 空のままなら、従来のlocalhostのBrokerにもそのまま接続できる。
+USERNAME = os.getenv("MQTT_USERNAME", default="")
+PASSWORD = os.getenv("MQTT_PASSWORD", default="")
 
 # トピック名の先頭。公開ブローカーで他の班と混ざらないよう、必要なら .env で変える
-PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "project_exercises/v1")
+PREFIX = os.getenv("MQTT_TOPIC_PREFIX", default="project_exercises/v1")
 
 # ---- トピック（MQTTの「宛先」）の一覧 ----
 # UI → 通信制御
@@ -50,6 +56,8 @@ def create_client(role):
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=client_id,
     )
+    if USERNAME:
+        client.username_pw_set(USERNAME, PASSWORD)
     return client
 
 

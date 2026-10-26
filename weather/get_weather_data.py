@@ -19,7 +19,7 @@ def get_weather(latitude, longitude, target_date):
             "relative_humidity_2m_mean"
         ),
         "wind_speed_unit": "ms",  # 風速を m/s で受け取る（共通仕様）
-        "timezone": "Asia/Tokyo",
+        "timezone": "auto",  # 指定座標の現地時間で日別データを取得する
         "start_date": target_date,
         "end_date": target_date,
     }
