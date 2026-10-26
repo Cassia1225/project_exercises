@@ -16,9 +16,7 @@
     location, date, level, Pollen, weather, Wind, items, reason
 
 使い方:
-=======
     from recommend import recommend 紛らわしい。
->>>>>>> origin/feature/logic:recommend.py
     response = recommend(request_dict)  # ルールベースのみ。外部通信なし
 
     from llm_advisor import make_gemini_advisor
@@ -26,9 +24,7 @@
     response = recommend(request_dict, advisor=advisor)
 
 役割分担:
-=======
     level（対策レベル）
->>>>>>> origin/feature/logic:recommend.py
     items（対策文）… Geminiが利用できる場合は生成。失敗時はルールベースに戻す
 """
 import json
@@ -58,14 +54,19 @@ _ALIASES = {
     "hinoki": ["hinoki", "ヒノキ", "ひのき", "檜", "japanese_cypress", "japanese cypress"],
     "ragweed": ["ragweed", "ブタクサ", "ぶたくさ"],
     "mugwort": ["mugwort", "ヨモギ", "よもぎ", "蓬"],
+    "birch": ["birch", "シラカバ", "しらかば", "白樺"],
+    "oak": ["oak", "オーク", "ナラ", "なら"],
+    "kamogaya": ["kamogaya", "カモガヤ", "かもがや"],
     "tree": ["tree", "樹木", "木本"],
     "grass": ["grass", "イネ科", "graminales"],
     "weed": ["weed", "雑草"],
 }
 # 個別の花粉種 → 大分類
-_GROUP = {"sugi": "tree", "hinoki": "tree", "ragweed": "weed", "mugwort": "weed"}
+_GROUP = {"sugi": "tree", "hinoki": "tree", "ragweed": "weed", "mugwort": "weed",
+          "birch": "tree", "oak": "tree", "kamogaya": "grass"}
 _JP_NAME = {
     "sugi": "スギ", "hinoki": "ヒノキ", "ragweed": "ブタクサ", "mugwort": "ヨモギ",
+    "birch": "シラカバ", "oak": "オーク", "kamogaya": "カモガヤ",
     "tree": "樹木", "grass": "イネ科", "weed": "雑草",
 }
 

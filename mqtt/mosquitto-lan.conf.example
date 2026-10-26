@@ -1,0 +1,9 @@
+# 複数PC用のBroker設定例。既存のlocalhost:1883の設定は変更しない。
+# リポジトリのルートから起動する:
+#   mosquitto -c mqtt/mosquitto-lan.conf.example -v
+# 先に mqtt/passwords を作る。詳しくは docs/mqtt-multiple-pcs.md を参照。
+
+listener 1884 0.0.0.0
+allow_anonymous false
+password_file mqtt/passwords
+persistence false
