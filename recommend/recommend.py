@@ -16,7 +16,7 @@
     location, date, level, Pollen, weather, Wind, items, reason
 
 使い方:
-    from recommend import recommend　紛らわしい。
+    from recommend import recommend 紛らわしい。
     response = recommend(request_dict)  # ルールベースのみ。外部通信なし
 
     from llm_advisor import make_gemini_advisor
@@ -24,21 +24,17 @@
     response = recommend(request_dict, advisor=advisor)
 
 役割分担:
-    level（対策レベル）… 常にPythonのルールで確定する　なにを？
+    level（対策レベル）
     items（対策文）… Geminiが利用できる場合は生成。失敗時はルールベースに戻す
 """
-from __future__ import annotations
-
 import json
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 # 生成AIに渡す関数の型: 文脈 dict を受け取り、対策文のリストを返す（失敗時は例外）
-Advisor = Callable[[Dict[str, Any]], List[str]]
+# （advisor という名前で recommend() に渡す。渡さなければ生成AIは使わない）
 
 SCHEMA_VERSION = "1.0"
 
@@ -58,14 +54,19 @@ _ALIASES = {
     "hinoki": ["hinoki", "ヒノキ", "ひのき", "檜", "japanese_cypress", "japanese cypress"],
     "ragweed": ["ragweed", "ブタクサ", "ぶたくさ"],
     "mugwort": ["mugwort", "ヨモギ", "よもぎ", "蓬"],
+    "birch": ["birch", "シラカバ", "しらかば", "白樺"],
+    "oak": ["oak", "オーク", "ナラ", "なら"],
+    "kamogaya": ["kamogaya", "カモガヤ", "かもがや"],
     "tree": ["tree", "樹木", "木本"],
     "grass": ["grass", "イネ科", "graminales"],
     "weed": ["weed", "雑草"],
 }
 # 個別の花粉種 → 大分類
-_GROUP = {"sugi": "tree", "hinoki": "tree", "ragweed": "weed", "mugwort": "weed"}
+_GROUP = {"sugi": "tree", "hinoki": "tree", "ragweed": "weed", "mugwort": "weed",
+          "birch": "tree", "oak": "tree", "kamogaya": "grass"}
 _JP_NAME = {
     "sugi": "スギ", "hinoki": "ヒノキ", "ragweed": "ブタクサ", "mugwort": "ヨモギ",
+    "birch": "シラカバ", "oak": "オーク", "kamogaya": "カモガヤ",
     "tree": "樹木", "grass": "イネ科", "weed": "雑草",
 }
 
@@ -75,22 +76,26 @@ MAX_ITEM_LEN = 60
 _FORBIDDEN_WORDS = ("薬", "服用", "処方", "診断", "治療", "病院", "サプリ")
 
 
-@dataclass
 class UserProfile:
-    user_id: str = ""
-    allergies: List[str] = field(default_factory=list)  # 例: ["sugi", "スギ", "ブタクサ"]
+    """利用者の情報（ID と アレルギーの一覧）をまとめておく入れ物。"""
+
+    def __init__(self, user_id="", allergies=None):
+        self.user_id = user_id
+        if allergies is None:
+            allergies = []
+        self.allergies = allergies  # 例: ["sugi", "スギ", "ブタクサ"]
 
 
 class InputError(Exception):
     """入力が使えないときの例外。プロトコルの errors 1件に対応する。"""
 
-    def __init__(self, source: str, code: str, message: str):
+    def __init__(self, source, code, message):
         super().__init__(message)
         self.source = source
         self.code = code
         self.message = message
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self):
         return {"source": self.source, "code": self.code, "message": self.message}
 
 
@@ -109,15 +114,45 @@ _POLLEN_WORDS = [
 _POLLEN_SHORT = {"l": "low", "m": "medium", "med": "medium", "h": "high", "vh": "very_high"}
 
 
-def _is_number_like(raw: Any) -> bool:
+def _is_number_like(raw):
+    """数値、または "12" "3.5" のような数字だけの文字列なら True。"""
     if isinstance(raw, bool):
         return False
     if isinstance(raw, (int, float)):
         return True
-    return isinstance(raw, str) and re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", raw) is not None
+    if not isinstance(raw, str):
+        return False
+    if re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", raw) is None:
+        return False
+    return True
 
 
-def _pollen_from_number(v: float) -> str:
+def _contains_any(text, words):
+    """text の中に、words のどれか1つでも含まれていれば True。"""
+    for word in words:
+        if word in text:
+            return True
+    return False
+
+
+def _remove_duplicates(values):
+    """リストから重複を取り除く（最初に出てきた順番は保つ）。"""
+    result = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _number_text(value):
+    """数値を表示用の文字にする。5.0 のような整数は "5" にする。"""
+    number = float(value)
+    if number == int(number):
+        return str(int(number))
+    return str(number)
+
+
+def _pollen_from_number(v):
     if v < 0:
         raise InputError("pollen", "INVALID_VALUE", f"花粉量が負の値です: {v}")
     if POLLEN_NUMERIC_SCALE == "upi":  # 0〜5段階
@@ -137,7 +172,7 @@ def _pollen_from_number(v: float) -> str:
     return "very_high"
 
 
-def normalize_pollen(raw: Any) -> str:
+def normalize_pollen(raw):
     """花粉量を 'low' / 'medium' / 'high' / 'very_high' に正規化する。
     解釈できない値は黙って medium にせず InputError を投げる。"""
     if _is_number_like(raw):
@@ -152,7 +187,7 @@ def normalize_pollen(raw: Any) -> str:
     raise InputError("pollen", "INVALID_VALUE", f"花粉量を解釈できません: {raw!r}")
 
 
-def _wind_category(v: float) -> str:
+def _wind_category(v):
     if v < WIND_CALM_MAX:
         return "calm"
     if v < WIND_STRONG_MIN:
@@ -160,15 +195,18 @@ def _wind_category(v: float) -> str:
     return "strong"
 
 
-def normalize_wind(raw: Any) -> str:
+def normalize_wind(raw):
     """風速を 'calm' / 'moderate' / 'strong' に正規化する。
     "最大5.1 m/s" や "30 km/h"、"強い" のような文字列も受け付ける。"""
     if _is_number_like(raw):
         return _wind_category(float(raw))
     if isinstance(raw, str):
         s = raw.strip().lower()
-        numbers = [float(n) for n in _NUMBER_RE.findall(s)]
-        if numbers:
+        # 文字の中の数字を全部取り出す（例: "3〜5 m/s" → [3.0, 5.0]）
+        numbers = []
+        for n in _NUMBER_RE.findall(s):
+            numbers.append(float(n))
+        if len(numbers) > 0:
             v = max(numbers)  # "3〜5 m/s" のような幅は大きい方を採用
             if "km/h" in s or "km／h" in s or "キロ" in s:
                 v /= 3.6
@@ -182,7 +220,7 @@ def normalize_wind(raw: Any) -> str:
     raise InputError("wind", "INVALID_VALUE", f"風速を解釈できません: {raw!r}")
 
 
-def normalize_weather(raw: Any) -> str:
+def normalize_weather(raw):
     """天気を 'rain' / 'clear' / 'other' に正規化する。
 
     Open-Meteo の WMO weather_code（例: 0, 61, 71, 95）にも対応する。
@@ -205,55 +243,61 @@ def normalize_weather(raw: Any) -> str:
     s = str(raw).strip().lower()
     if re.fullmatch(r"\d+", s):
         return normalize_weather(int(s))
-    if any(w in s for w in ("雨", "雪", "rain", "shower", "snow", "drizzle", "thunderstorm")):
+    if _contains_any(s, ("雨", "雪", "rain", "shower", "snow", "drizzle", "thunderstorm")):
         return "rain"
-    if any(w in s for w in ("晴", "clear", "sunny")):
+    if _contains_any(s, ("晴", "clear", "sunny")):
         return "clear"
     return "other"
 
 
-def _canon_allergen(name: str) -> Optional[str]:
+def _canon_allergen(name):
+    """表記ゆれのある名前（例: "杉"）を、決まった名前（例: "sugi"）に直す。表になければ None。"""
     n = name.strip().lower()
     for key, aliases in _ALIASES.items():
-        if n in [a.lower() for a in aliases]:
-            return key
+        for alias in aliases:
+            if n == alias.lower():
+                return key
     return None
 
 
-def _extract_pollen_types(pollen_raw: Any, explicit: Optional[List[str]]) -> Set[str]:
+def _extract_pollen_types(pollen_raw, explicit):
     """当日の花粉種を、pollen_types と pollen の文字列（例:「多い（雑草花粉）」）から集める。"""
-    types: Set[str] = set()
-    for t in explicit or []:
+    types = set()
+    if explicit is None:
+        explicit = []
+    for t in explicit:
         c = _canon_allergen(str(t))
         if c:
             types.add(c)
     if isinstance(pollen_raw, str):
         text = pollen_raw.lower()
         for key, aliases in _ALIASES.items():
-            if any(a.lower() in text for a in aliases):
-                types.add(key)
+            for alias in aliases:
+                if alias.lower() in text:
+                    types.add(key)
+                    break
     return types
 
 
-def _allergy_matches(allergies: List[str], types: Set[str]) -> List[str]:
+def _allergy_matches(allergies, types):
     """登録アレルギーのうち、当日の花粉種と一致するもの（大分類も考慮）を返す。"""
     matched = []
     for a in allergies:
-        c = _canon_allergen(str(a)) or str(a).strip().lower()
-        if any(c == t or _GROUP.get(c) == t or _GROUP.get(t) == c for t in types):
-            matched.append(str(a))
+        c = _canon_allergen(str(a))
+        if c is None:
+            c = str(a).strip().lower()
+        for t in types:
+            # 同じ種類か、片方がもう片方の大分類（例: sugi と tree）なら一致とみなす
+            if c == t or _GROUP.get(c) == t or _GROUP.get(t) == c:
+                matched.append(str(a))
+                break
     return matched
 
 
 
 # 推薦の部分（レベル判定と対策リストいるかわからん）
 
-def evaluate(
-    pollen_cat: str,
-    wind_cat: str,
-    weather_cat: str,
-    matched_allergies: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+def evaluate(pollen_cat, wind_cat, weather_cat, matched_allergies=None):
     """正規化済みの値から level / items / reasons を決める。"""
     score = _POLLEN_BASE_SCORE[pollen_cat]
     reasons = [f"花粉の飛散量が「{_POLLEN_JP[pollen_cat]}」"]
@@ -269,9 +313,14 @@ def evaluate(
         score += 1
         reasons.append(f"登録アレルギー（{'、'.join(matched_allergies)}）の飛散が見込まれる")
 
-    idx = min(max(score, 0), len(LEVELS) - 1)
+    # score を 0〜3（LEVELS の番号）の範囲におさめる
+    idx = score
+    if idx < 0:
+        idx = 0
+    if idx > len(LEVELS) - 1:
+        idx = len(LEVELS) - 1
 
-    items: List[str] = []
+    items = []
     if idx >= 2:
         items += ["マスクを着用する", "花粉対策用メガネを持参する", "帰宅後は衣服についた花粉を払う"]
         if idx == 3:
@@ -285,26 +334,18 @@ def evaluate(
     if idx >= 1 and weather_cat == "rain":
         items.append("濡れた衣服は早めに着替える")
 
-    return {"level": LEVELS[idx], "items": list(dict.fromkeys(items)), "reasons": reasons}
+    return {"level": LEVELS[idx], "items": _remove_duplicates(items), "reasons": reasons}
 
 
 
 # 生成AIとの連携部分（送るデータの組み立て、対策文の検証）
 
-def _clip(value: Any, limit: int = 60) -> str:
+def _clip(value, limit=60):
     """外部から来た文字列を1行・短くして、生成AIに渡せる形にする。"""
     return re.sub(r"\s+", " ", str(value)).strip()[:limit]
 
 
-def build_llm_context(
-    level: str,
-    pollen_text: str,
-    wind_text: str,
-    weather_text: str,
-    time_text: Any,
-    matched_allergies: List[str],
-    base_items: List[str],
-) -> Dict[str, Any]:
+def build_llm_context(level, pollen_text, wind_text, weather_text, time_text, matched_allergies, base_items):
     """生成AIに送るデータ。必要最小限にする（user_id・地域名・生の入力は送らない）。
     level は Python が決めた確定値で、AIには変更させない。"""
     matched_jp = []
@@ -312,23 +353,29 @@ def build_llm_context(
         key = _canon_allergen(name)
         if key:  # 表にない自由記述は送らない
             matched_jp.append(_JP_NAME[key])
+
+    if time_text:
+        time_value = _clip(time_text)
+    else:
+        time_value = None
+
     return {
         "level": level,
         "pollen": _clip(pollen_text),
         "wind": _clip(wind_text),
         "weather": _clip(weather_text),
-        "time": _clip(time_text) if time_text else None,
+        "time": time_value,
         "matched_allergies": matched_jp,
         "base_items": base_items,
     }
 
 
-def clean_items(items: Any) -> List[str]:
+def clean_items(items):
     """生成AIが返した対策文を検証する。使えなければ ValueError。
     （AIの出力はそのままUIに出さず、必ずここを通す）"""
     if not isinstance(items, list) or not items:
         raise ValueError("items が空、またはリストではありません")
-    cleaned: List[str] = []
+    cleaned = []
     for it in items:
         if not isinstance(it, str):
             raise ValueError("items に文字列以外が含まれています")
@@ -337,10 +384,10 @@ def clean_items(items: Any) -> List[str]:
             continue
         if len(text) > MAX_ITEM_LEN:
             raise ValueError(f"対策文が長すぎます（{len(text)}文字）")
-        if any(w in text for w in _FORBIDDEN_WORDS):
+        if _contains_any(text, _FORBIDDEN_WORDS):
             raise ValueError(f"MVP方針外の語を含みます: {text}")
         cleaned.append(text)
-    cleaned = list(dict.fromkeys(cleaned))
+    cleaned = _remove_duplicates(cleaned)
     if not cleaned or len(cleaned) > MAX_ITEMS:
         raise ValueError(f"対策文の件数が不正です（{len(cleaned)}件）")
     return cleaned
@@ -349,7 +396,7 @@ def clean_items(items: Any) -> List[str]:
 
 # プロトコル（JSON）への組み立て
 
-def _error_response(request_id: Any, errors: List[Dict[str, str]]) -> Dict[str, Any]:
+def _error_response(request_id, errors):
     return {
         "schema_version": SCHEMA_VERSION,
         "request_id": request_id,
@@ -359,46 +406,52 @@ def _error_response(request_id: Any, errors: List[Dict[str, str]]) -> Dict[str, 
     }
 
 
-def _upstream_errors(request: Dict[str, Any]) -> List[Dict[str, str]]:
+def _upstream_errors(request):
     """データ収集側がエラーを返してきた場合、その内容を取り出す。"""
-    errors = request.get("errors") or []
+    errors = request.get("errors")
+    if not errors:
+        errors = []
     if request.get("status") == "error" and not errors:
         errors = [{"source": "unknown", "code": "UPSTREAM_ERROR", "message": "上流の処理でエラーが発生しました"}]
-    return [
-        {
+
+    result = []
+    for e in errors:
+        if not isinstance(e, dict):
+            continue  # 辞書でないものは読み飛ばす
+        result.append({
             "source": str(e.get("source", "unknown")),
             "code": str(e.get("code", "UPSTREAM_ERROR")),
             "message": str(e.get("message", "上流の処理でエラーが発生しました")),
-        }
-        for e in errors
-        if isinstance(e, dict)
-    ]
+        })
+    return result
 
 
-def _require(payload: Dict[str, Any], key: str, label: str) -> Any:
-    value = payload.get(key)
-    if value is None or (isinstance(value, str) and not value.strip()):
-        raise InputError(key, "MISSING_DATA", f"{label}がありません")
-    return value
+def _is_empty(value):
+    """None や、空白だけの文字列なら True。"""
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    return False
 
 
-def _require_any(payload: Dict[str, Any], keys: List[str], label: str) -> Any:
+def _require_any(payload, keys, label):
     """仕様書のキーと旧実装の小文字キーの両方を受け付ける。"""
     for key in keys:
         value = payload.get(key)
-        if value is not None and not (isinstance(value, str) and not value.strip()):
+        if not _is_empty(value):
             return value
     raise InputError(keys[0], "MISSING_DATA", f"{label}がありません")
 
 
-def _display(raw: Any, fallback: str) -> str:
+def _display(raw, fallback):
     """UIに返す表示用の文字列。文字列ならそのまま、数値なら fallback を使う。"""
     if isinstance(raw, str) and not _is_number_like(raw):
         return raw
     return fallback
 
 
-def _weather_display(raw: Any, category: str) -> str:
+def _weather_display(raw, category):
     """Open-Meteo の weather_code が数値なら、UI向けの日本語に変換する。"""
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
         code = int(raw)
@@ -421,18 +474,16 @@ def _weather_display(raw: Any, category: str) -> str:
         return "雪"
     if 95 <= code <= 99:
         return "雷雨"
-    return {"clear": "晴れ", "rain": "雨・雪など", "other": "くもりなど"}[category]
+    if category == "clear":
+        return "晴れ"
+    if category == "rain":
+        return "雨・雪など"
+    return "くもりなど"
 
 
-def recommend(
-    request: Dict[str, Any],
-    user: Optional[UserProfile] = None,
-    include_reasons: bool = False,
-    advisor: Optional[Advisor] = None,
-) -> Dict[str, Any]:
+def recommend(request, user=None, include_reasons=False, advisor=None):
     """推薦のメイン関数。例外は投げず、必ずプロトコルの dict を返す。
 
-    対策レベル(level)は常にPythonのルールで決める。
     advisor（生成AIに文脈を送って対策文を返す関数）を渡すと、items をAIが作る。
     advisor が失敗したり、返答が検証を通らなかった場合は、ルールベースの items に戻す。
     advisor=None なら外部通信は一切しない。
@@ -448,7 +499,10 @@ def recommend(
         return _error_response(request_id, upstream)
 
     # {"status": "success", "data": {...}} の封筒形式にも対応
-    payload = request["data"] if isinstance(request.get("data"), dict) else request
+    if isinstance(request.get("data"), dict):
+        payload = request["data"]
+    else:
+        payload = request
 
     try:
         _require_any(payload, ["location"], "対象の地域名")
@@ -464,28 +518,41 @@ def recommend(
         return _error_response(request_id, [e.to_dict()])
 
     # ユーザー情報（引数が優先。なければ request["user"]）
-    allergies: List[str] = []
+    allergies = []
     if user is not None:
         allergies = list(user.allergies)
     elif isinstance(payload.get("user"), dict):
-        allergies = list(payload["user"].get("allergies") or [])
+        user_allergies = payload["user"].get("allergies")
+        if user_allergies:
+            allergies = list(user_allergies)
 
     types = _extract_pollen_types(pollen_raw, payload.get("pollen_types"))
-    matched = _allergy_matches(allergies, types) if allergies else []
+    if allergies:
+        matched = _allergy_matches(allergies, types)
+    else:
+        matched = []
 
     result = evaluate(pollen_cat, wind_cat, weather_cat, matched)
 
-    wind_text = _display(
-        wind_raw, f"{float(wind_raw):g} m/s" if _is_number_like(wind_raw) else str(wind_raw)
-    )
+    # 風速が数値なら "5.1 m/s" の形にする
+    if _is_number_like(wind_raw):
+        wind_fallback = _number_text(wind_raw) + " m/s"
+    else:
+        wind_fallback = str(wind_raw)
+    wind_text = _display(wind_raw, wind_fallback)
     pollen_text = _display(pollen_raw, _POLLEN_JP[pollen_cat])
+
+    # 日付は "day" か "date" のどちらかに入っている
+    day = payload.get("day")
+    if not day:
+        day = payload.get("date")
 
     # 対策文: 既定はルールベース。advisor があれば生成AIに作らせる（失敗時はルールベースに戻す）
     items = result["items"]
     if advisor is not None:
         context = build_llm_context(
             result["level"], pollen_text, wind_text, str(weather_raw),
-            payload.get("day") or payload.get("date"), matched, items,
+            day, matched, items,
         )
         try:
             items = clean_items(advisor(context))
@@ -495,9 +562,10 @@ def recommend(
 
     # UIとの共通仕様：location / date / level / Pollen / weather / Wind / items / reason
     # 入力の「day」は共通仕様の「date」に統一して返す。
-    data: Dict[str, Any] = {
+    data = {
         "location": payload.get("location"),
-        "date": payload.get("day") or payload.get("date"),
+        "day": day,
+
         "level": result["level"],
         "Pollen": pollen_text,
         "weather": _weather_display(weather_raw, weather_cat),
@@ -519,6 +587,8 @@ def recommend(
 # サンプル実行: python recommend.py
 
 if __name__ == "__main__":
+    from llm_advisor import make_gemini_advisor
+
     sample = {
         "request_id": "req-001",
         "location": "千葉県習志野市",
@@ -527,10 +597,23 @@ if __name__ == "__main__":
         "weather": "おおむね晴れ〜一部曇り",
         "Wind": "最大5.1 m/s",
     }
-    weather_failed = {
-        "request_id": "req-001",
-        "status": "error",
-        "errors": [{"source": "weather", "code": "API_ERROR", "message": "気象情報を取得できませんでした"}],
-    }
-    for req in (sample, weather_failed):
-        print(json.dumps(recommend(req), ensure_ascii=False, indent=2))
+
+
+    try:
+        # Gemini APIを使用するための関数を作成
+        advisor = make_gemini_advisor()
+
+        # Geminiを使って対策文を生成
+       
+        result = recommend(sample, advisor=advisor)
+
+        print(json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2
+        ))
+
+    except Exception as e:
+        print("Gemini APIの準備に失敗しました")
+        print(type(e).__name__, str(e))
+

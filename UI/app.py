@@ -1,23 +1,19 @@
+import html
+import sys
+from pathlib import Path
 import streamlit as st
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
-# 【追加】高野さんが作ったファイルを読み込む（同じフォルダに recommend.py を置いておく）
-try:
-    from recommend import get_recommendation
-except ImportError:
-    # まだ高野さんのファイルがない場合のダミー処理
-    def get_recommendation(loc, d, a):
-        return {
-            "level": "注意レベル：高",
-            "pollen": "取得中...",
-            "weather": "取得中...",
-            "wind": "取得中...",
-            "advice": "データ連携の準備中です。"
-        }
+# 1つ上のフォルダー（リポジトリのルート）を読み込み先に追加する（common を使うため）
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+# 通信制御へMQTTで検索を依頼する関数と、選べる地域の一覧
+from mqtt_client import ask_server
+from common.locations import PREFECTURES, cities_of
 
 # --- ページ基本設定 ---
 st.set_page_config(
-    page_title="花粉対策ナビ",
+    page_title="花粉対策ナビ (Global Edition)",
     page_icon="🌿",
     layout="centered"
 )
@@ -31,6 +27,8 @@ st.markdown("""
     .main-title { color: #2d4a3e; font-weight: 700; text-align: center; margin-bottom: 25px; letter-spacing: 1px; }
     .section-title { color: #3d5a45; font-size: 1.15rem; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; }
     [data-testid="stSidebar"] { background-color: #f0f4ed; }
+    /* 予報詳細データの値が長いとき「...」で切らずに折り返す */
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,28 +37,109 @@ st.markdown("<h1 class='main-title'>🌿 花粉対策ナビ</h1>", unsafe_allow_
 
 # --- サイドバー ---
 st.sidebar.header("⚙️ ユーザー設定")
-selected_allergies = st.sidebar.multiselect(
-    "該当するアレルギーを選択",
-    ["スギ", "ヒノキ", "ブタクサ", "シラカバ", "カモガヤ", "未登録 / わからない"],
-    default=["スギ"]
-)
+# 1. 国内は既存の地域一覧、海外は都市名で指定する
+area_type = st.sidebar.radio("🌏 対象エリアの選択", ["日本国内", "海外主要都市"])
+if area_type == "日本国内":
+    # 都道府県を変えると、市区町村の一覧も変わる
+    prefecture = st.sidebar.selectbox("都道府県", PREFECTURES, index=PREFECTURES.index("千葉県"))
+    cities = cities_of(prefecture)
+    if prefecture == "千葉県":
+        first_city = cities.index("習志野市")
+    else:
+        first_city = 0
+    city = st.sidebar.selectbox("市区町村", cities, index=first_city)
+    location = prefecture + " " + city
+else:
+    preset_city = st.sidebar.selectbox(
+        "主要都市から選択",
+        ["直接入力する", "New York, New York, USA", "London, UK", "Paris, France", "Sydney, Australia", "Tokyo, Japan"],
+        index=1,
+        key="overseas_city",
+    )
+    if preset_city == "直接入力する":
+        location = st.sidebar.text_input("都市名と国名・州名（英語表記）", value="New York, New York, USA").strip()
+        st.sidebar.caption("例：Paris, France。同名の都市がある場合は州名で絞り込んでください。")
+    else:
+        location = preset_city
 
 st.sidebar.markdown("---")
-location = st.sidebar.text_input("地域", value="千葉県 習志野市")
 
-today = date.today()
+# 2. 見せる名前と送信する値を分け、推薦プログラムが読める値を送る
+allergy_labels = {
+    "スギ": "スギ (春)",
+    "ヒノキ": "ヒノキ (春)",
+    "ブタクサ": "ブタクサ (秋)",
+    "ヨモギ": "ヨモギ (秋)",
+    "シラカバ": "シラカバ / Birch",
+    "カモガヤ": "カモガヤ / Grass (イネ科)",
+    "オーク": "Oak (オーク / 海外)",
+    "未登録 / わからない": "未登録 / わからない",
+}
+today = datetime.now(timezone(timedelta(hours=9))).date()
+if today.month in [9, 10, 11]:
+    default_allergy = ["ブタクサ"]
+else:
+    default_allergy = ["スギ"]
+selected_allergies = st.sidebar.multiselect(
+    "該当するアレルギーを選択",
+    list(allergy_labels),
+    default=default_allergy,
+    format_func=allergy_labels.get,
+)
+st.sidebar.caption("季節の表記と初期選択は日本を目安にしています。現在の推薦は花粉の分類（樹木・イネ科・雑草）との照合を使います。")
+
+# 3. 日程候補は日本時間で作る
 date_options = {
     f"今日 ({today.strftime('%m/%d')})": today,
     f"明日 ({(today + timedelta(days=1)).strftime('%m/%d')})": today + timedelta(days=1),
     f"明後日 ({(today + timedelta(days=2)).strftime('%m/%d')})": today + timedelta(days=2),
 }
-selected_date_label = st.sidebar.selectbox("確認したい日程", list(date_options.keys()), index=0)
+selected_date_label = st.sidebar.selectbox("確認したい日程", list(date_options.keys()), index=0, key="forecast_date")
 
 
-# =========================================================
-# 【重要】高野さんの関数を実行してデータを受け取る！
-# =========================================================
-data = get_recommendation(location, selected_date_label, selected_allergies)
+# 検索ボタン。押したときだけMQTTで問い合わせる
+# （チェックボックスを触るたびに再検索しないよう、結果は session_state に保存する）
+st.sidebar.caption("日程候補は日本時間です。天気は対象地域の現地時間、花粉は提供元の日付で表示します。")
+if st.sidebar.button("🔍 対策を調べる", type="primary", use_container_width=True):
+    if area_type == "海外主要都市" and (not location or "," not in location):
+        st.error("都市名と国名または州名を、カンマで区切って入力してください。")
+        st.stop()
+    target_date = date_options[selected_date_label].isoformat()  # 例: "2026-10-20"
+    with st.spinner("気象・花粉の情報を取得しています..."):
+        st.session_state["result"] = ask_server(location, target_date, selected_allergies)
+    # 検索結果と条件を一緒に保存する（入力だけ変えても過去の結果と混同しない）
+    st.session_state["searched"] = {
+        "area_type": area_type,
+        "location": location,
+        "date_label": selected_date_label,
+        "allergies": list(selected_allergies),
+    }
+
+# 更新前の画面が保存した結果には、検索時のアレルギー設定がないため再検索する
+if "result" not in st.session_state or not isinstance(st.session_state.get("searched"), dict):
+    st.info("サイドバーで地域と日程を選び、「対策を調べる」を押してください。")
+    st.stop()
+
+result = st.session_state["result"]
+
+# 失敗したとき（"success" でも、一部だけ取れた "partial" でもないとき）
+if result["status"] not in ("success", "partial"):
+    for error in result.get("errors", []):
+        st.error(f"取得できませんでした（{error['source']}）: {error['message']}")
+    st.stop()
+
+data = result["data"]
+searched = st.session_state["searched"]
+searched_date_label = searched["date_label"]
+searched_allergies = searched["allergies"]
+# 海外検索では、通信制御が確定した都市・州・国名を表示する
+result_location = data.get("location", searched["location"])
+
+if result["status"] == "partial":
+    st.warning("一部の情報が取得できなかったため、取得できた情報だけを表示しています。")
+
+if result.get("pollen_is_mock"):
+    st.warning("花粉データはダミーの値です（GOOGLE_POLLEN_API_KEY が未設定）。")
 
 
 # --- メイン画面表示 ---
@@ -70,7 +149,7 @@ st.markdown(f"""
 <div class="nature-card">
     <div class="section-title">📍 確認中の対象エリア・日程</div>
     <p style="font-size: 1.05rem; color: #4a5d4e; margin: 0;">
-        <b>地域:</b> {location} &nbsp;|&nbsp; <b>日程:</b> {selected_date_label}
+        <b>地域・日程:</b> {html.escape(searched["area_type"])} &nbsp;|&nbsp; {html.escape(str(result_location))} / {html.escape(searched_date_label)}
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -79,14 +158,14 @@ st.markdown(f"""
 # 2. 日付ごとの花粉警戒度（高野さんのデータ: data["level"] を表示）
 st.markdown(f"""
 <div class="warning-card">
-    <div class="section-title" style="color: #c85a32;">🚨 {selected_date_label} の花粉警戒度</div>
-    <h2 style="color: #e07a5f; margin: 5px 0; font-weight: bold;">【 {data['level']} 】</h2>
+    <div class="section-title" style="color: #c85a32;">🚨 {html.escape(searched_date_label)} の花粉警戒度</div>
+    <h2 style="color: #e07a5f; margin: 5px 0; font-weight: bold;">【 {html.escape(str(data['level']))} 】</h2>
 </div>
 """, unsafe_allow_html=True)
 
-if "未登録 / わからない" not in selected_allergies and len(selected_allergies) > 0:
-    allergies_text = "・".join(selected_allergies)
-    st.warning(f"🌱 **【アレルギー個別に注意】** {selected_date_label} は **{allergies_text}** の飛散が多くなる見込みです。しっかり対策してお出かけください。")
+if "未登録 / わからない" not in searched_allergies and len(searched_allergies) > 0:
+    allergies_text = "・".join(searched_allergies)
+    st.info(f"🌱 {searched_date_label} の検索時のアレルギー設定：{allergies_text}。分類単位の情報を使っており、各植物の飛散を個別に確認した予報ではありません。")
 
 
 # 3. 詳細データ（高野さんのデータ: pollen, weather, wind を表示）
@@ -94,11 +173,11 @@ st.markdown("<div class='section-title'>📊 予報詳細データ</div>", unsaf
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric(label="🌸 予想飛散量", value=data["pollen"])
+    st.metric(label="🌸 予想飛散量", value=data["Pollen"])
 with col2:
     st.metric(label="☀️ 天気予報", value=data["weather"])
 with col3:
-    st.metric(label="💨 予想風速", value=data["wind"])
+    st.metric(label="💨 予想風速", value=data["Wind"])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -110,23 +189,24 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-st.checkbox("😷 花粉ガードマスクを着用した")
-st.checkbox("👓 メガネ・サングラスを着用した")
-st.checkbox("🧥 つるつるした素材の上着を選んだ")
-st.checkbox("🧹 帰宅時に花粉を払う準備（ブラシ等）")
+# 推薦プログラムが決めた持ち物・行動を、チェック項目として表示する
+for item in data["items"]:
+    st.checkbox(item)
+if len(data["items"]) == 0:
+    st.write("対策を決められる情報がありませんでした。")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 
-# 5. 推薦理由（高野さんのデータ: data["advice"] を表示）
+# 5. 推薦理由（高野さんのデータ: data["reason"] を表示）
 st.markdown(f"""
 <div class="nature-card">
     <div class="section-title">📝 からだケアのアドバイス</div>
     <p style="color: #526355; line-height: 1.7; margin: 0;">
-        {data['advice']}<br>
+        {html.escape(str(data['reason']))}。<br>
         帰宅時は玄関前で衣服の花粉を払い、手洗い・うがい・洗顔で目や鼻についた花粉を優しく洗い流しましょう。
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("花粉対策ナビ - Natural Style UI v2.7 (関数連携対応版)")
+st.caption("花粉対策ナビ - Global & Seasonal Edition (MQTT連携対応版)")
