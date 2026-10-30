@@ -34,8 +34,8 @@ def test_protocol_fields_match_specification():
     assert res["status"] == "success"
     assert res["errors"] == []
     data = res["data"]
-    assert set(data) == {"location", "date", "level", "Pollen", "weather", "Wind", "items", "reason"}
-    assert data["date"] == "2026-10-12"
+    assert set(data) == {"location", "day", "level", "Pollen", "weather", "Wind", "items", "reason"}
+    assert data["day"] == "2026-10-12"
     assert data["Pollen"] == SAMPLE["Pollen"]
     assert data["Wind"] == SAMPLE["Wind"]
     assert isinstance(data["items"], list)
@@ -52,7 +52,7 @@ def test_legacy_date_pollen_wind_aliases_are_accepted():
     }
     res = recommend(old)
     assert res["status"] == "success"
-    assert res["data"]["date"] == old["date"]
+    assert res["data"]["day"] == old["date"]
 
 
 def test_without_advisor_uses_rule_based_items():

@@ -89,6 +89,7 @@ def make_gemini_advisor(model=DEFAULT_MODEL, client=None, api_key=None, max_outp
                 "GEMINI_API_KEY が設定されていません。環境変数にGemini APIキーを設定してください。"
             )
         client = genai.Client(api_key=key)
+        
 
     def call_llm(system, user_json):
         print("【確認】Gemini APIの呼び出し処理に入りました")
