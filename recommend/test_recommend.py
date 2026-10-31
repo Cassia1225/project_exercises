@@ -12,7 +12,7 @@ from recommend import UserProfile, recommend
 SAMPLE = {
     "request_id": "req-001",
     "location": "千葉県習志野市",
-    "day": "2026-10-12",
+    "date": "2026-10-12",
     "Pollen": "多い（雑草花粉）",
     "weather": "おおむね晴れ〜一部曇り",
     "Wind": "最大5.1 m/s",
@@ -53,6 +53,25 @@ def test_legacy_date_pollen_wind_aliases_are_accepted():
     res = recommend(old)
     assert res["status"] == "success"
     assert res["data"]["date"] == old["date"]
+
+
+@pytest.mark.parametrize("dates, expected", [
+    ({"date": "2026-10-12"}, "2026-10-12"),
+    ({"day": "2026-10-13"}, "2026-10-13"),
+    ({"date": "2026-10-12", "day": "2026-10-13"}, "2026-10-12"),
+    ({"date": "", "day": "2026-10-13"}, "2026-10-13"),
+])
+@pytest.mark.parametrize("enveloped", [False, True])
+def test_date_is_canonical_and_day_is_only_an_input_alias(dates, expected, enveloped):
+    payload = {key: value for key, value in SAMPLE.items() if key != "date"}
+    payload.update(dates)
+    request = {"request_id": "req-001", "status": "success", "data": payload} if enveloped else payload
+    seen = {}
+    result = recommend(request, advisor=lambda context: seen.update(context) or AI_ITEMS)
+    assert result["status"] == "success"
+    assert result["data"]["date"] == expected
+    assert "day" not in result["data"]
+    assert seen["time"] == expected
 
 
 def test_without_advisor_uses_rule_based_items():

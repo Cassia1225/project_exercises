@@ -4,3 +4,19 @@ memo.txt
 __pycache__/
 .pytest_cache/
 .claude/
+<<<<<<< Updated upstream
+=======
+.pytest_cache/
+.gitignore
+
+# 複数PC用の接続設定と、Brokerのパスワードファイル
+.env.lan
+.env.lan.*
+!.env.lan.example
+/mqtt/passwords
+
+# 公開Brokerの個人別検証設定（見本だけ共有する）
+.env.hivemq
+.env.hivemq.*
+!.env.hivemq.example
+>>>>>>> Stashed changes

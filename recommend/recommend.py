@@ -4,7 +4,7 @@
     {
         "request_id": "req-001",
         "location": "千葉県習志野市",
-        "day": "2026-10-12",  # date でも可
+        "date": "2026-10-12",  # 旧day入力も互換用に受け付ける
         "Pollen": "多い（雑草花粉）",  # pollen でも可
         "weather": "おおむね晴れ〜一部曇り",  # Open-Meteo weather_code の数値でも可
         "Wind": "最大5.1 m/s",  # wind でも可。共通仕様の単位は m/s
@@ -502,7 +502,7 @@ def recommend(request, user=None, include_reasons=False, advisor=None):
 
     try:
         _require_any(payload, ["location"], "対象の地域名")
-        _require_any(payload, ["day", "date"], "外出予定の日付")
+        target_date = _require_any(payload, ["date", "day"], "外出予定の日付")
         pollen_raw = _require_any(payload, ["Pollen", "pollen"], "花粉情報")
         weather_raw = _require_any(payload, ["weather"], "気象情報（天気）")
         wind_raw = _require_any(payload, ["Wind", "wind"], "気象情報（風速）")
@@ -538,17 +538,12 @@ def recommend(request, user=None, include_reasons=False, advisor=None):
     wind_text = _display(wind_raw, wind_fallback)
     pollen_text = _display(pollen_raw, _POLLEN_JP[pollen_cat])
 
-    # 日付は "day" か "date" のどちらかに入っている
-    day = payload.get("day")
-    if not day:
-        day = payload.get("date")
-
     # 対策文: 既定はルールベース。advisor があれば生成AIに作らせる（失敗時はルールベースに戻す）
     items = result["items"]
     if advisor is not None:
         context = build_llm_context(
             result["level"], pollen_text, wind_text, str(weather_raw),
-            day, matched, items,
+            target_date, matched, items,
         )
         try:
             items = clean_items(advisor(context))
@@ -560,7 +555,12 @@ def recommend(request, user=None, include_reasons=False, advisor=None):
     # 入力の「day」は共通仕様の「date」に統一して返す。
     data = {
         "location": payload.get("location"),
+<<<<<<< Updated upstream
         "date": day,
+=======
+        "date": target_date,
+
+>>>>>>> Stashed changes
         "level": result["level"],
         "Pollen": pollen_text,
         "weather": _weather_display(weather_raw, weather_cat),
@@ -585,7 +585,7 @@ if __name__ == "__main__":
     sample = {
         "request_id": "req-001",
         "location": "千葉県習志野市",
-        "day": "2026-10-12",
+        "date": "2026-10-12",
         "Pollen": "多い（雑草花粉）",
         "weather": "おおむね晴れ〜一部曇り",
         "Wind": "最大5.1 m/s",

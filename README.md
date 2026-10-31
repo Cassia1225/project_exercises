@@ -66,6 +66,39 @@ streamlit run UI/app.py
 
 ブラウザーで地域と日程を選び「対策を調べる」を押すと結果が出ます。止めるときは各ターミナルで Ctrl+C。
 
+<<<<<<< Updated upstream
+=======
+### 複数のPCで担当を分けて動かす場合
+
+従来の `python run_all.py` と `.env` は、1台で動かす方法として引き続き使えます。
+各自のPCで動かす場合は、別の `.env.lan` に共通Brokerの接続先を設定して、自分の担当だけを起動します。
+
+```bash
+python run_role.py weather --env-file .env.lan
+```
+
+`weather` を `ui`・`server`・`pollen`・`recommend` に変えると、その担当だけが起動します。
+[複数PCで動かす手順](docs/mqtt-multiple-pcs.md)に、Mac・Windowsの準備、Broker、設定、起動順、確認方法をまとめています。
+
+### HiveMQ公開BrokerのWebSocket + TLSで検証する場合
+
+既存のローカル/LAN用設定を残したまま、`.env.hivemq.example` を `.env.hivemq` にコピーし、全PCで同じランダムなTopic prefixを設定します。
+
+```bash
+python run_role.py weather --env-file .env.hivemq
+```
+
+`weather` を `server`・`pollen`・`recommend`・`ui` に変えて全5役を1つずつ起動します。接続先は `broker.hivemq.com:8884`、`MQTT_TRANSPORT=websockets`、`MQTT_WS_PATH=/mqtt`、`MQTT_TLS=true` です。共通factoryで接続前にWebSocketとTLSを設定し、証明書検証を有効にしています。
+
+**公開Brokerは学習・検証専用です。** 他者も購読・送信できるため、APIキー・パスワード・実際のアレルギー・精密な現在地などはPublishせず、架空の条件を使います。ランダムprefixは混線回避用で、アクセス制御ではありません。
+
+[HiveMQで2台PCを使って検証する手順](docs/mqtt-hivemq.md)に、設定例、全5役の起動、ローカル/LANへの戻し方、テストと未検証範囲をまとめています。
+
+### 日付の共通仕様
+
+アプリの要求と推薦結果は日付を `date`（YYYY-MM-DD）で渡します。旧 `day` は推薦関数の入力時だけ互換用に受け付け、出力は `date` のみです。両方に有効な値がある場合は `date` を優先します。
+
+>>>>>>> Stashed changes
 ### 注意
 
 - ブローカーは自分のPCの Mosquitto（`localhost`）を使います。
