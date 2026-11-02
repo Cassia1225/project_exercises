@@ -63,7 +63,7 @@ def test_forecast_uses_location_timezone(monkeypatch):
 
 def reply(location, target_date, allergies):
     return {'status': 'success', 'data': {
-        'location': location, 'day': target_date, 'level': '低', 'Pollen': '少ない',
+        'location': location, 'date': target_date, 'level': '低', 'Pollen': '少ない',
         'weather': '晴れ', 'Wind': '1 m/s', 'items': ['マスク'], 'reason': '試験用の理由',
     }, 'errors': []}
 

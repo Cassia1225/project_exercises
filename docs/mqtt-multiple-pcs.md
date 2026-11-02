@@ -1,5 +1,7 @@
 # 複数のPCでMQTTを使って動かす
 
+このページはLAN内のMosquitto用です。HiveMQ公開BrokerのWebSocket + TLSで試す場合は、[HiveMQ検証手順](mqtt-hivemq.md)を使います。既存 `.env.lan` はそのまま保持できます。
+
 ## 1. 1台用と複数PC用の違い
 
 今までの `python run_all.py` は、そのまま使えます。
@@ -34,7 +36,7 @@ Brokerを別のPCに置いても構いません。全員が、同じ1つのBroke
 
 ## 3. 各PCの準備
 
-全員が同じ版のコードを用意します。今回の作業ブランチ名は `MQTT_各自実行版` です。
+全員が同じ版のコードを用意します。この手順は `main` に統合されています。古い `MQTT_各自実行版` を選ぶ必要はありません。
 以下の操作は、`README.md` や `run_role.py` があるプロジェクトのフォルダーで行います。
 既に仮想環境 `env` がある人は、作り直さず、その環境を使ってください。
 
@@ -125,7 +127,7 @@ Windows:
 このターミナルは開いたままにします。止めるときはCtrl+Cです。
 `Address already in use` と表示されたら、1884を使っている別のBrokerなどを確認します。
 
-この設定例は、同じ信頼できるLANでの学習用です。通信は暗号化されないので、最初の確認には架空のアレルギー条件を使います。インターネット向けのポート開放には使いません。離れた自宅同士でつなぐ場合は、認証・TLSを備えたBrokerなどを別途用意する必要があります。
+この設定例は、同じ信頼できるLANでの学習用です。通信は暗号化されないので、最初の確認には架空のアレルギー条件を使います。インターネット向けのポート開放には使いません。離れた自宅同士で実データを扱う場合は、認証・TLS・送受信権限を備えたBrokerなどを別途用意します。架空条件での学習・検証には[HiveMQ公開Broker](mqtt-hivemq.md)も選べます。
 
 ## 5. 全員の `.env.lan` をそろえる
 
@@ -139,6 +141,9 @@ Windowsでは `ipconfig` の使用中のアダプターのIPv4アドレスでも
 ```dotenv
 MQTT_BROKER=192.168.0.10
 MQTT_PORT=1884
+MQTT_TRANSPORT=tcp
+MQTT_WS_PATH=/mqtt
+MQTT_TLS=false
 MQTT_TOPIC_PREFIX=group8/project_exercises/v1
 MQTT_USERNAME=group8
 MQTT_PASSWORD=Brokerで登録したパスワード
@@ -223,6 +228,6 @@ Mosquittoとmosquitto_passwdが見つからないPCでは、この通信試験�
 
 同じPC上の別プロセスでの確認は、複数の物理PCでの確認とは異なります。
 各自のPC・Windows実機・利用するLANでの確認は、上の手順で別途行ってください。
-既存の推薦テストには、正常結果の日付キー `day` と期待値 `date` の不一致による2件の失敗があります。今回の担当別起動の追加とは分けて扱います。
+2026-10-30に、アプリの送受信日付は `date` に統一しました。旧 `day` 入力は互換用に受け付けますが、返却には `date` だけを使います。日付キー不一致による既存2件のテスト失敗も解消済みです。
 
 参考: [Mosquitto設定の公式説明](https://mosquitto.org/man/mosquitto-conf-5.html)、[Paho MQTTの公式説明](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html)

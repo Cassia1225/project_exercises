@@ -3,8 +3,8 @@
 接続先（ブローカー）は .env の MQTT_BROKER で変えられる。
 何も書かなければ、自分のPCで動かしている Mosquitto（localhost）につなぐ。
 
-※ 別々のPCで動かすときは、全員の .env.lan に
-   「Mosquitto を動かしているPCのIPアドレス」を書く（localhost は自分のPCのこと）。
+別々のPCでは .env.lan（Mosquitto）か .env.hivemq（公開Broker）を選ぶ。
+公開Brokerは学習・検証専用。秘密情報や実在する個人の情報を送らない。
 """
 import json
 import os
@@ -18,7 +18,24 @@ load_dotenv()
 
 #右端の引数は、デフォルト引数
 BROKER = os.getenv("MQTT_BROKER", default="localhost")
-PORT = int(os.getenv("MQTT_PORT", default="1883"))
+try:
+    PORT = int(os.getenv("MQTT_PORT", default="1883"))
+except ValueError:
+    raise ValueError("MQTT_PORT は1〜65535の整数を指定してください") from None
+if not 1 <= PORT <= 65535:
+    raise ValueError("MQTT_PORT は1〜65535の整数を指定してください")
+
+# 従来のローカル/LAN設定はTCP・TLSなしのまま使える。
+TRANSPORT = os.getenv("MQTT_TRANSPORT", default="tcp").strip().lower()
+WS_PATH = os.getenv("MQTT_WS_PATH", default="/mqtt")
+_tls_value = os.getenv("MQTT_TLS", default="false").strip().lower()
+if TRANSPORT not in ("tcp", "websockets"):
+    raise ValueError("MQTT_TRANSPORT は tcp または websockets を指定してください")
+if _tls_value not in ("true", "false", "1", "0"):
+    raise ValueError("MQTT_TLS は true / false または 1 / 0 を指定してください")
+TLS = _tls_value in ("true", "1")
+if TRANSPORT == "websockets" and not WS_PATH.startswith("/"):
+    raise ValueError("MQTT_WS_PATH は / から始まるパスを指定してください")
 
 # 複数PC用Brokerでパスワードを使う場合だけ設定する。
 # 空のままなら、従来のlocalhostのBrokerにもそのまま接続できる。
@@ -55,7 +72,15 @@ def create_client(role):
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=client_id,
+        transport=TRANSPORT,
     )
+    if TRANSPORT == "websockets":
+        client.ws_set_options(path=WS_PATH)
+    if TLS:
+        # OSの信頼済みCAとホスト名を検証する。tls_insecure_set(True)は使わない。
+        client.tls_set()
+    if BROKER.lower() == "broker.hivemq.com":
+        print("公開Brokerは学習・検証専用です。秘密情報・実際の個人情報をPublishしないでください")
     if USERNAME:
         client.username_pw_set(USERNAME, PASSWORD)
     return client

@@ -45,6 +45,9 @@ def handle_request(request):
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code != 0:
+        print("ブローカーへの接続が拒否されました:", reason_code)
+        return
     print("ブローカーに接続しました:", reason_code)
     client.subscribe(ms.TOPIC_POLLEN_REQUEST, qos=1)
 

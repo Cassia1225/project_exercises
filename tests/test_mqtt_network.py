@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -205,6 +206,8 @@ sys.modules["get_pollen_data"] = pollen
         assert first["data"]["location"] == "テスト地域A"
         assert second["data"]["location"] == "テスト地域B"
         assert first["request_id"] != second["request_id"]
+        assert first["data"]["date"] == second["data"]["date"] == "2026-10-23"
+        assert "day" not in first["data"] and "day" not in second["data"]
         assert first["pollen_is_mock"] is True
     finally:
         for process in processes:
@@ -213,3 +216,107 @@ sys.modules["get_pollen_data"] = pollen
             process.wait(timeout=5)
         for log in logs:
             log.close()
+
+
+@pytest.mark.parametrize("role,module_name,input_topic,output_topic,subscriptions", [
+    ("server", "server", "TOPIC_REQUEST", "TOPIC_WEATHER_REQUEST", 4),
+    ("weather", "send_weather", "TOPIC_WEATHER_REQUEST", "TOPIC_WEATHER_RESULT", 1),
+    ("pollen", "send_pollen", "TOPIC_POLLEN_REQUEST", "TOPIC_POLLEN_RESULT", 1),
+    ("recommend", "send_recommend", "TOPIC_RECOMMEND_REQUEST", "TOPIC_RECOMMEND_RESULT", 1),
+])
+def test_worker_resubscribes_after_socket_loss(broker_factory, monkeypatch, role, module_name,
+                                              input_topic, output_topic, subscriptions):
+    """TCPを途中切断し、Pahoの自動再接続後も実際に依頼を受け取れること。"""
+    port, _ = broker_factory(False)
+    for name, value in {"TRANSPORT": "tcp", "TLS": False, "USERNAME": "", "PASSWORD": ""}.items():
+        monkeypatch.setattr(ms, name, value)
+    module = __import__(module_name)
+    if role == "server":
+        monkeypatch.setattr(module, "waiting", {})
+        monkeypatch.setattr(module, "completed", {})
+        monkeypatch.setattr(module, "find_location", lambda name: {"name": name, "latitude": 0, "longitude": 0})
+    elif role == "weather":
+        monkeypatch.setattr(module, "get_weather", lambda *args: {"weather_code": 0, "wind_speed_max": 1})
+    elif role == "pollen":
+        monkeypatch.setattr(module, "get_pollen_info", lambda *args: ({"upi": 3, "types": {"WEED": 3}}, True))
+    worker, observer = ms.create_client(role), ms.create_client("observer")
+    worker.reconnect_delay_set(min_delay=1, max_delay=1)
+    worker.on_connect, worker.on_message = module.on_connect, module.on_message
+    ready, observer_ready = threading.Event(), threading.Event()
+    acknowledged = []
+    def subscribed(c, u, mid, codes, props):
+        assert not any(code.is_failure for code in codes)
+        acknowledged.extend(codes)
+        if len(acknowledged) % subscriptions == 0:
+            ready.set()
+    worker.on_subscribe = subscribed
+    results = queue.Queue()
+    observer.on_subscribe = lambda *args: observer_ready.set()
+    observer.on_message = lambda c, u, message: results.put(ms.read_json(message))
+    try:
+        assert not connect_client(observer, port).is_failure
+        observer.subscribe(getattr(ms, output_topic), qos=1)
+        assert observer_ready.wait(5)
+        worker.connect("127.0.0.1", port, 60)
+        worker.loop_start()
+        assert ready.wait(5)
+        ready.clear()
+        # 公開socket() APIで回線断を模擬。disconnect()は呼ばず自動復旧を試す。
+        worker.socket().shutdown(socket.SHUT_RDWR)
+        assert ready.wait(6), "再接続後のSUBACKが届きませんでした"
+        request_id = uuid.uuid4().hex
+        ms.send_json(observer, getattr(ms, input_topic), {
+            "request_id": request_id, "location": "架空地域", "latitude": 0, "longitude": 0,
+            "date": "2026-11-02", "allergies": [],
+            "weather": {"weather_code": 0, "wind_speed_max": 1},
+            "pollen": {"upi": 3, "types": {"WEED": 3}},
+        })
+        reply = results.get(timeout=5)
+        assert reply["request_id"] == request_id
+        if role != "server":
+            assert reply["status"] == "success"
+    finally:
+        worker.disconnect()
+        worker.loop_stop()
+        observer.disconnect()
+        observer.loop_stop()
+
+
+def test_server_reports_missing_workers_while_idle(broker_factory, tmp_path, monkeypatch):
+    """通信制御の実際の起動経路で、追加受信なしに期限切れ通知する。"""
+    from mqtt_client import ask_server
+    port, broker_log = broker_factory(False)
+    prefix = "audit/timeout/" + uuid.uuid4().hex
+    for name, value in {"BROKER": "127.0.0.1", "PORT": port, "PREFIX": prefix,
+                        "TOPIC_REQUEST": prefix + "/request", "TRANSPORT": "tcp",
+                        "TLS": False, "USERNAME": "", "PASSWORD": ""}.items():
+        monkeypatch.setattr(ms, name, value)
+    (tmp_path / "sitecustomize.py").write_text('''
+import sys, types
+locations = types.ModuleType("common.locations")
+locations.find_location = lambda name: {"name": name, "latitude": 0, "longitude": 0}
+sys.modules["common.locations"] = locations
+''')
+    environment = os.environ.copy()
+    environment.update({"MQTT_BROKER": "127.0.0.1", "MQTT_PORT": str(port),
+                        "MQTT_TOPIC_PREFIX": prefix, "MQTT_TRANSPORT": "tcp", "MQTT_TLS": "false",
+                        "MQTT_USERNAME": "", "MQTT_PASSWORD": "", "PYTHONPATH": str(tmp_path),
+                        "PYTHONDONTWRITEBYTECODE": "1"})
+    root = Path(__file__).resolve().parents[1]
+    with (tmp_path / "server.log").open("w") as log:
+        process = subprocess.Popen([sys.executable, "-u", "server/server.py"], cwd=root,
+                                   env=environment, stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic() + 10
+            while prefix + "/request" not in broker_log.read_text():
+                assert process.poll() is None
+                assert time.monotonic() < deadline
+                time.sleep(0.05)
+            # 気象・花粉・推薦は意図的に起動しない。
+            result = ask_server("架空地域", "2026-11-02", [], timeout=30)
+            assert result["status"] == "error"
+            assert result["errors"][0]["source"] == "server"
+            assert result["errors"][0]["code"] == "REQUEST_TIMEOUT"
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
