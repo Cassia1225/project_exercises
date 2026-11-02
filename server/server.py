@@ -12,6 +12,8 @@
 起動方法（リポジトリのルートで）: python server/server.py
 """
 import sys
+import threading
+from time import monotonic, sleep
 from pathlib import Path
 
 # 1つ上のフォルダー（リポジトリのルート）を読み込み先に追加する（common を使うため）
@@ -23,6 +25,30 @@ from common.locations import find_location
 # 処理中の検索を request_id ごとに覚えておく辞書
 # 例: {"abc123": {"ui_request": {...}, "weather": None, "pollen": {...}}}
 waiting = {}
+# 完了直後のQoS 1再配送で同じ検索を開始し直さない。永続化はしない。
+completed = {}
+REQUEST_TIMEOUT = 25
+DUPLICATE_TTL = 60
+waiting_lock = threading.RLock()
+
+
+def valid_request_id(value):
+    return (isinstance(value, str) and bool(value)
+            and not any(char in value for char in ("/", "+", "#", "\0")))
+
+
+def expire_waiting(client, now=None):
+    """受信が途絶えていても、未完了の検索と完了IDを回収する。"""
+    now = monotonic() if now is None else now
+    with waiting_lock:
+        for request_id, expires_at in list(completed.items()):
+            if expires_at <= now:
+                completed.pop(request_id)
+        for request_id, entry in list(waiting.items()):
+            if entry["expires_at"] <= now:
+                waiting.pop(request_id)
+                completed[request_id] = now + DUPLICATE_TTL
+                send_error_to_ui(client, request_id, "担当からの応答が時間内にそろいませんでした", "REQUEST_TIMEOUT")
 
 
 def make_worker_request(ui_request, place):
@@ -49,13 +75,13 @@ def make_recommend_request(ui_request, weather_result, pollen_result):
     }
 
 
-def send_error_to_ui(client, request_id, message):
+def send_error_to_ui(client, request_id, message, code="INVALID_INPUT"):
     """UIへエラーを返す（共通仕様の status / errors に合わせる）。"""
     reply = {
         "request_id": request_id,
         "status": "error",
         "data": None,
-        "errors": [{"source": "server", "code": "INVALID_INPUT", "message": message}],
+        "errors": [{"source": "server", "code": code, "message": message}],
     }
     ms.send_json(client, ms.result_topic_for(request_id), reply)
 
@@ -64,7 +90,15 @@ def send_error_to_ui(client, request_id, message):
 
 def on_ui_request(client, request):
     """1. UIから検索の依頼が来たとき"""
-    request_id = request["request_id"]
+    request_id = request.get("request_id")
+    if not valid_request_id(request_id):
+        return
+    if request_id in waiting or request_id in completed:
+        return
+    if not all(isinstance(request.get(key), str) and request[key] for key in ("location", "date")):
+        send_error_to_ui(client, request_id, "locationとdateを指定してください")
+        return
+    expires_at = monotonic() + REQUEST_TIMEOUT
 
     try:
         place = find_location(request["location"])
@@ -84,7 +118,8 @@ def on_ui_request(client, request):
     # 地域検索で確定した都市名を、推薦結果と画面にも渡す
     request = dict(request)
     request["location"] = place["name"]
-    waiting[request_id] = {"ui_request": request, "weather": None, "pollen": None}
+    waiting[request_id] = {"ui_request": request, "weather": None, "pollen": None,
+                           "recommend_sent": False, "expires_at": expires_at}
 
     # 2. 気象と花粉へ、同じ内容の依頼を同時に送る
     worker_request = make_worker_request(request, place)
@@ -96,30 +131,41 @@ def on_ui_request(client, request):
 def on_worker_result(client, result):
     """気象または花粉の結果が来たとき"""
     request_id = result.get("request_id")
-    if request_id not in waiting:
+    if not valid_request_id(request_id) or request_id not in waiting:
         return  # 知らない検索（他の人の検索や、終わった検索）の結果は無視
 
     # source は "weather" か "pollen" のどちらかだけを受け付ける
     if result.get("source") not in ("weather", "pollen"):
         return
+    if (result.get("status") not in ("success", "error") or "data" not in result
+            or (result["data"] is not None and not isinstance(result["data"], dict))):
+        return
 
     entry = waiting[request_id]
+    if entry[result["source"]] is not None or entry["recommend_sent"]:
+        return
     entry[result["source"]] = result  # source は "weather" か "pollen"
 
     # 3. 両方そろったら、推薦プログラムへ送る
     if entry["weather"] is not None and entry["pollen"] is not None:
         message = make_recommend_request(entry["ui_request"], entry["weather"], entry["pollen"])
         ms.send_json(client, ms.TOPIC_RECOMMEND_REQUEST, message)
+        entry["recommend_sent"] = True
         print("推薦へ依頼しました:", request_id)
 
 
 def on_recommend_result(client, response):
     """4. 推薦の結果が来たとき → UIへ返す"""
-    request_id = response["request_id"]
-    if request_id not in waiting:
+    request_id = response.get("request_id")
+    if not valid_request_id(request_id) or request_id not in waiting:
         return
-
-    entry = waiting.pop(request_id)  # この検索はこれで終わりなので、辞書から消す
+    entry = waiting[request_id]
+    if (not entry["recommend_sent"] or response.get("status") not in ("success", "partial", "error")
+            or "data" not in response or not isinstance(response.get("errors"), list)):
+        return
+    waiting.pop(request_id)
+    completed[request_id] = monotonic() + DUPLICATE_TTL
+    response = dict(response)
     response["pollen_is_mock"] = entry["pollen"].get("is_mock", False)
     ms.send_json(client, ms.result_topic_for(request_id), response)
     print("UIへ結果を返しました:", request_id, response["status"])
@@ -128,6 +174,9 @@ def on_recommend_result(client, response):
 # ---------- MQTTの設定 ----------
 
 def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code != 0:
+        print("ブローカーへの接続が拒否されました:", reason_code)
+        return
     print("ブローカーに接続しました:", reason_code)
     client.subscribe(ms.TOPIC_REQUEST, qos=1)
     client.subscribe(ms.TOPIC_WEATHER_RESULT, qos=1)
@@ -136,6 +185,12 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 
 def on_message(client, userdata, message):
+    # MQTT受信スレッドと、期限切れ回収の処理でwaitingを同時変更しない。
+    with waiting_lock:
+        _on_message(client, userdata, message)
+
+
+def _on_message(client, userdata, message):
     # おかしなメッセージが1件来ても、プログラム全体が止まらないようにする
     try:
         data = ms.read_json(message)
@@ -146,7 +201,9 @@ def on_message(client, userdata, message):
         if message.topic == ms.TOPIC_REQUEST:
             on_ui_request(client, data)
         elif message.topic in (ms.TOPIC_WEATHER_RESULT, ms.TOPIC_POLLEN_RESULT):
-            on_worker_result(client, data)
+            expected = "weather" if message.topic == ms.TOPIC_WEATHER_RESULT else "pollen"
+            if data.get("source") == expected:
+                on_worker_result(client, data)
         elif message.topic == ms.TOPIC_RECOMMEND_RESULT:
             on_recommend_result(client, data)
 
@@ -161,4 +218,13 @@ if __name__ == "__main__":
 
     client.connect(ms.BROKER, ms.PORT, 60)
     print("通信制御プログラムを起動しました。止めるときは Ctrl+C")
-    client.loop_forever()
+    client.loop_start()
+    try:
+        while True:
+            sleep(1)
+            expire_waiting(client)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.disconnect()
+        client.loop_stop()

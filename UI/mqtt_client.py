@@ -22,17 +22,26 @@ def ask_server(location, target_date, allergies, timeout=30):
 
     subscribed = threading.Event()  # 購読が終わったら合図する旗
     results = queue.Queue()         # 届いた結果を入れる箱
+    failures = []
 
     def on_connect(client, userdata, flags, reason_code, properties):
+        if reason_code != 0:
+            failures.append("MQTT接続が拒否されました: " + str(reason_code))
+            subscribed.set()
+            return
         # 自分の検索の返信先だけを購読する
         client.subscribe(my_result_topic, qos=1)
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
+        if not reason_codes or any(code not in (0, 1, 2) for code in reason_codes):
+            failures.append("MQTTの購読が拒否されました")
         subscribed.set()
 
     def on_message(client, userdata, message):
         data = ms.read_json(message)
-        if data is not None:
+        if (data is not None and message.topic == my_result_topic
+                and data.get("request_id") == request_id
+                and data.get("status") in ("success", "partial", "error")):
             results.put(data)
 
     client = ms.create_client("ui")
@@ -50,6 +59,8 @@ def ask_server(location, target_date, allergies, timeout=30):
         # 返信を受け取る準備ができてから依頼を送る（先に送ると返信を取り逃す）
         if not subscribed.wait(timeout=10):
             return _error("MQTTの購読がタイムアウトしました")
+        if failures:
+            return _error(failures[0])
 
         request = {
             "request_id": request_id,

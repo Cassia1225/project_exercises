@@ -1,13 +1,20 @@
 
 import uuid
+import threading
 import paho.mqtt.client as mqtt
 
 BROKER = "broker.hivemq.com"
 PORT = 8884
-TOPIC = "projectensyuu/team8/test"
+TOPIC = "projectensyuu/team8/test-7c4a91"
+
+connected = threading.Event()
 
 def on_connect(client, userdata, flags, reason_code, properties):
-    print("接続結果:", reason_code)
+    if reason_code == 0:
+        print("Broker接続成功！")
+        connected.set()
+    else:
+        print("接続失敗:", reason_code)
 
 client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
@@ -20,12 +27,15 @@ client.tls_set()
 
 client.on_connect = on_connect
 
-client.connect(BROKER, PORT, 60)
-client.loop_start()
-
 try:
+    client.connect(BROKER, PORT, 60)
+    client.loop_start()
+
+    if not connected.wait(timeout=15):
+        raise TimeoutError("Brokerへの接続が完了しませんでした")
+
     while True:
-        message = input("送信する文字を入力（exitで終了）: ")
+        message = input("送信するメッセージ（exitで終了）: ")
 
         if message == "exit":
             break
@@ -38,7 +48,11 @@ try:
         )
 
         info.wait_for_publish(timeout=10)
-        print("送信処理結果:", info.rc)
+
+        if info.is_published():
+            print("Brokerへの送信完了！")
+        else:
+            print("送信確認がタイムアウトしました")
 
 finally:
     client.disconnect()

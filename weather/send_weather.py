@@ -40,6 +40,9 @@ def handle_request(request):
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code != 0:
+        print("ブローカーへの接続が拒否されました:", reason_code)
+        return
     print("ブローカーに接続しました:", reason_code)
     # 接続できたら、依頼のトピックを購読する（再接続したときもここが呼ばれる）
     client.subscribe(ms.TOPIC_WEATHER_REQUEST, qos=1)
