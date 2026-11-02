@@ -158,3 +158,12 @@ HiveMQ対応時に残っていた推薦の `data.day` とテストの `data.date
 - [HiveMQ公開Brokerの接続情報](https://hivemq.mqtt-dashboard.com/)
 - [HiveMQ公開Brokerの案内](https://www.hivemq.com/mqtt/public-mqtt-broker/)
 - [Paho Python Client：transport・ws_set_options・tls_set](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html)
+
+
+## 2026-11-02 mainへの統合時の確認
+
+`feature/api_weather` のHiveMQ接続変更を、海外対応を含む `main` を基準に統合しました。UI・地域解決・気象/花粉取得・Geminiの修正・担当別起動はmainを維持し、日付のみ本人指定により `date` に統一しています。旧 `day` は入力互換用です。
+
+統合候補の通常テストは108件成功・公開試験1件スキップでした。`pytest.ini` により、引数なしの `python -m pytest -q` でも管理テストを収集します。ルートの `mqtt_test.py` などは手動確認用で、自動収集には含めません。
+
+同日の公開HiveMQ明示試験は、TCPで `broker.hivemq.com:8884` へ接続する段階でタイムアウトしました。TLS・WebSocket接続および5役の往復まで到達していません。2026-10-30の成功結果と区別し、使用するネットワークで再確認してください。今回、実APIや物理複数PCの追加確認は行っていません。
