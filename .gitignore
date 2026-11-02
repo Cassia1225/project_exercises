@@ -17,3 +17,4 @@ __pycache__/
 .env.hivemq
 .env.hivemq.*
 !.env.hivemq.example
+.env.hivemq.example
