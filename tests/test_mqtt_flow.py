@@ -146,6 +146,8 @@ def test_recommend_input_works_with_existing_recommend_function():
     }
     response = recommend(make_recommend_input(message))
     assert response["status"] == "success"
+    assert response["data"]["date"] == message["date"]
+    assert "day" not in response["data"]
     assert response["data"]["level"] == "高"
     assert response["data"]["weather"] == "晴れ"
 
@@ -216,6 +218,8 @@ def test_recommend_without_pollen_index_shows_level_unknown():
     }
     response = make_response(message)
     assert response["status"] == "partial"
+    assert response["data"]["date"] == message["date"]
+    assert "day" not in response["data"]
     assert response["data"]["level"] == "判定不可"
     assert response["data"]["weather"] == "晴れ"
     assert response["data"]["Wind"] == "3.2 m/s"

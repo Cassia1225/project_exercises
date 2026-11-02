@@ -205,6 +205,8 @@ sys.modules["get_pollen_data"] = pollen
         assert first["data"]["location"] == "テスト地域A"
         assert second["data"]["location"] == "テスト地域B"
         assert first["request_id"] != second["request_id"]
+        assert first["data"]["date"] == second["data"]["date"] == "2026-10-23"
+        assert "day" not in first["data"] and "day" not in second["data"]
         assert first["pollen_is_mock"] is True
     finally:
         for process in processes:
