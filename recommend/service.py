@@ -1,19 +1,5 @@
-"""⑤ 推薦プログラム（高野さん担当）
-
-通信制御から、気象と花粉の結果をまとめた依頼をMQTTで受け取り、
-recommend.py の recommend() で対策を決めて、MQTTで返す。
-
-起動方法（リポジトリのルートで）: python recommend/send_recommend.py
-"""
-import sys
-from pathlib import Path
-
-# 1つ上のフォルダー（リポジトリのルート）を読み込み先に追加する（common を使うため）
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
-from common import mqtt_settings as ms
-# _weather_display は recommend.py の中の関数（天気コード → 日本語）を借りて使う
-from recommend import recommend, normalize_weather, _weather_display
+"""取得済みの気象・花粉データを推薦関数へ渡す。"""
+from .recommend import recommend, normalize_weather, _weather_display
 
 
 def upi_to_text(upi):
@@ -33,7 +19,7 @@ def upi_to_text(upi):
 
 
 def make_recommend_input(message):
-    """MQTTで受け取った依頼を、既存の recommend() の入力の形に変える。
+    """集約処理から受け取った依頼を、既存の recommend() の入力の形に変える。
 
     取得に失敗した情報は None のまま渡す（recommend() がエラーとして返す）。
     """
@@ -120,36 +106,3 @@ def make_response(message):
     # ふつうの場合は、既存の recommend() に任せる
     return recommend(make_recommend_input(message))
 
-
-def on_connect(client, userdata, flags, reason_code, properties):
-    if reason_code != 0:
-        print("ブローカーへの接続が拒否されました:", reason_code)
-        return
-    print("ブローカーに接続しました:", reason_code)
-    client.subscribe(ms.TOPIC_RECOMMEND_REQUEST, qos=1)
-
-
-def on_message(client, userdata, message):
-    # おかしなメッセージが1件来ても、プログラム全体が止まらないようにする
-    try:
-        request = ms.read_json(message)
-        if request is None:
-            return
-
-        print("依頼を受け取りました:", request["request_id"])
-        response = make_response(request)
-        ms.send_json(client, ms.TOPIC_RECOMMEND_RESULT, response)
-        print("結果を返しました:", response["status"])
-
-    except Exception as error:
-        print("メッセージの処理中にエラーが起きたので無視しました:", repr(error))
-
-
-if __name__ == "__main__":
-    client = ms.create_client("recommend")
-    client.on_connect = on_connect
-    client.on_message = on_message
-
-    client.connect(ms.BROKER, ms.PORT, 60)
-    print("推薦プログラムを起動しました。止めるときは Ctrl+C")
-    client.loop_forever()

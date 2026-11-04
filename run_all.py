@@ -1,41 +1,30 @@
-"""5つのプログラムを1つのコマンドでまとめて起動する。
-
-使い方（リポジトリのルートで、仮想環境を有効にしてから）:
-    python run_all.py
-
-Ctrl+C を1回押すと、5つすべてが止まる。
-"""
+"""python run_all.pyで画面と、そこから呼ぶ取得・推薦処理を起動する。"""
+from pathlib import Path
 import subprocess
 import sys
-import time
 
-# 起動するファイルの一覧（UIは最後）
-PROGRAMS = [
-    "server/server.py",
-    "weather/send_weather.py",
-    "pollen/send_pollen.py",
-    "recommend/send_recommend.py",
-]
+ROOT = Path(__file__).resolve().parent
 
-# sys.executable は「今このファイルを動かしているPython」（仮想環境のPython）
-# -u は、print の表示をためずにすぐ出す指定（ないとログが遅れて出る）
-processes = []
-for program in PROGRAMS:
-    processes.append(subprocess.Popen([sys.executable, "-u", program]))
 
-time.sleep(2)  # 4つがブローカーにつながるのを待ってから、UIを起動する
-processes.append(subprocess.Popen([sys.executable, "-m", "streamlit", "run", "UI/app.py"]))
+def main(arguments=None):
+    if arguments is None:
+        arguments = sys.argv[1:]
+    command = [sys.executable, "-m", "streamlit", "run", str(ROOT / "UI/app.py"), *arguments]
+    process = subprocess.Popen(command, cwd=ROOT)
+    print("花粉対策ナビを起動しました。止めるときは Ctrl+C", flush=True)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        print("花粉対策ナビを停止しました", flush=True)
+        return 130
 
-print("5つのプログラムを起動しました。止めるときは Ctrl+C")
 
-try:
-    # Ctrl+C が押されるまで、ずっと待つ
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    # 5つすべてに「止まって」と合図し、止まるのを待つ
-    for process in processes:
-        process.terminate()
-    for process in processes:
-        process.wait()
-    print("すべて停止しました")
+if __name__ == "__main__":
+    sys.exit(main())

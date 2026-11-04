@@ -1,5 +1,4 @@
 streamlit
 python-dotenv
-paho-mqtt>=2.0
 requests
 pytest

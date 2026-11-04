@@ -1,106 +1,84 @@
-プロジェクト演習の開発で使用するリポジトリです。
+# 花粉対策ナビ（MQTT除外版）
 
-##ブランチ
+地域と日付を選び、気象・花粉情報に基づく外出対策を表示するアプリです。
+このブランチでは、画面・地域解決・気象取得・花粉取得・推薦を1台のPC内のPython関数でつなぎます。
 
-main : 最終統合先
-develop : 最終統合前に結合テストを行うブランチ
-feature/api_kafun : 花粉情報にまつわる機能開発用
-feature/api_weather : 気象情報にまつわる機能開発
-feature/logic : 推薦システム機能開発
-feature/view : UI用の開発ブランチ
+## 起動
 
-## 動かし方（MQTT版・最低限の動作）
+リポジトリのルートで実行します。既存の仮想環境がある場合は、その環境を使います。
 
-5つのプログラムがMQTTでつながり、Streamlitの画面に外出対策を表示します。
+Mac:
 
-```
-UI(①) ─request→ 通信制御(②) ─┬→ 気象(④)  ─┐
-  ↑                         └→ 花粉(③)  ─┴→ 通信制御(②) → 推薦(⑤) → 通信制御(②) ─result→ UI(①)
-```
-
-| 担当 | ファイル | 役割 |
-| --- | --- | --- |
-| ① UI | `UI/app.py`, `UI/mqtt_client.py` | 地域・日付を選んで依頼し、結果を表示 |
-| ② 通信制御 | `server/server.py` | 地域名→緯度経度、気象・花粉への依頼、結果の集約、推薦への依頼 |
-| ③ 花粉 | `pollen/send_pollen.py`, `pollen/get_pollen_data.py` | Google Pollen APIで花粉指数(UPI)を取得 |
-| ④ 気象 | `weather/send_weather.py`, `weather/get_weather_data.py` | Open-Meteoで天気・風速を取得 |
-| ⑤ 推薦 | `recommend/send_recommend.py`, `recommend/recommend.py` | レベル・対策・理由を決める |
-| 共通 | `common/mqtt_settings.py`, `common/locations.py`, `common/municipalities.json` | ブローカー・トピック名、都道府県・市区町村の一覧と座標の検索（国土地理院） |
-
-### 0. Mosquitto（MQTTブローカー）の準備（最初の1回、Mac）
-
-```
-brew install mosquitto
-brew services start mosquitto   # 以後、Macの起動時に自動で動く
-```
-
-### 1. 準備（最初の1回）
-
-```
-python3 -m venv env            # 仮想環境 env を作る
+```bash
 source env/bin/activate
 python -m pip install -r requirements.txt
-cp .env.example .env           # キーなどは .env にだけ書く（.env.example には書かない）
-```
-
-### 2. 起動（まとめて起動するのがおすすめ）
-
-```
-source env/bin/activate
 python run_all.py
 ```
 
-5つのプログラムを1つのターミナルでまとめて起動します。表示には `[気象]` などの名前が付きます。Ctrl+C を1回押すと全部止まります。
+Windows PowerShell:
 
-### 2'. 1つずつ起動する場合（ターミナルを5つ開き、リポジトリのルートで1つずつ）
-
-どのターミナルでも、先に `source env/bin/activate` を実行してから起動します。
-
-```
-python server/server.py
-python weather/send_weather.py
-python pollen/send_pollen.py
-python recommend/send_recommend.py
-streamlit run UI/app.py
+```powershell
+.\env\Scripts\python.exe -m pip install -r requirements.txt
+.\env\Scripts\python.exe run_all.py
 ```
 
-ブラウザーで地域と日程を選び「対策を調べる」を押すと結果が出ます。止めるときは各ターミナルで Ctrl+C。
+仮想環境がない場合は、最初に `python3 -m venv env`（Windowsは `py -m venv env`）で作成します。
 
-### 複数のPCで担当を分けて動かす場合
+通常はブラウザーで `http://localhost:8501` を開きます。地域・日付・任意のアレルギーを指定し、「対策を調べる」を押します。終了は起動したターミナルでCtrl+Cです。画面用の子プロセスも停止します。
 
-従来の `python run_all.py` と `.env` は、1台で動かす方法として引き続き使えます。
-各自のPCで動かす場合は、別の `.env.lan` に共通Brokerの接続先を設定して、自分の担当だけを起動します。
+`run_all.py` はこの版でも起動の入口です。Streamlitを1つ起動し、その中で各担当の処理を呼び出します。別々のPCで担当プログラムを常駐させる構成ではありません。
+
+## 設定
+
+`.env` がまだない場合だけ、`.env.example` を `.env` にコピーします。既存の `.env` は上書きしません。
+
+```dotenv
+GOOGLE_POLLEN_API_KEY=
+```
+
+Google Pollen APIの有効なキーを設定すると実際の花粉データを取得します。空欄の場合は従来どおりダミー値を使い、画面にも「ダミー」と表示します。取得に失敗した場合を、自動的にダミー成功へ置き換える動作はしません。
+
+Broker・Topic・接続ポート・MQTT認証の設定は不要です。Mosquitto、HiveMQ、EMQX、Pahoも使用しません。以前の個人設定ファイルに残る通信設定は参照しません。
+
+## 処理の流れ
+
+```mermaid
+flowchart LR
+    U[画面] --> C[地域解決・検索の取りまとめ]
+    C --> W[気象取得]
+    C --> P[花粉取得]
+    W --> R[推薦]
+    P --> R
+    R --> U
+```
+
+| 担当 | ファイル | 処理 |
+| --- | --- | --- |
+| 起動 | run_all.py | 画面の起動、終了コードの返却、Ctrl+Cでの終了 |
+| 画面 | UI/app.py | 国内/海外地域、日付、アレルギー入力、検索と結果表示 |
+| 取りまとめ | server/server.py | 入力確認、座標解決、気象/花粉取得の呼び出し、推薦結果の返却 |
+| 地域解決 | common/locations.py | 国内自治体・海外都市の座標を調べる |
+| 気象 | weather/get_weather_data.py | Open-Meteoの日別情報を取得・整形する |
+| 花粉 | pollen/get_pollen_data.py | Google Pollenを取得・整形する。キーなし時はダミー値を返す |
+| 推薦用の変換 | recommend/service.py | 取得済み情報を推薦関数の入力へ変換する |
+| 推薦 | recommend/recommend.py | 既存ルールでレベル・持ち物・行動・理由を決める |
+
+検索ごとにrequest_idを発行し、地域・日付・入力条件を一緒に渡します。日付は `date`（YYYY-MM-DD）です。画面の入力を変更しただけでは再取得せず、検索ボタンで取得します。
+
+地域検索・天気・実際の花粉APIへのHTTPS接続にはインターネットが必要です。取得できない場合は画面にエラーを返します。花粉の指数が提供されない日は「判定不可」とし、取得できた天気を表示する既存の処理を維持しています。
+
+通常の推薦はルール方式です。既存のGeminiアダプターは保持していますが、この起動経路でGeminiを自動利用する変更はしていません。
+
+## テスト
+
+リポジトリのルートで実行します。
 
 ```bash
-python run_role.py weather --env-file .env.lan
+python -m pytest -q
 ```
 
-`weather` を `ui`・`server`・`pollen`・`recommend` に変えると、その担当だけが起動します。
-[複数PCで動かす手順](docs/mqtt-multiple-pcs.md)に、Mac・Windowsの準備、Broker、設定、起動順、確認方法をまとめています。
+地域・データ整形・推薦・入力異常・API失敗・同時検索・画面操作・run_all.pyの起動/終了を確認します。外部APIは固定応答へ置き換え、実在する個人情報やAPIキーを送信しません。
 
-### HiveMQ公開BrokerのWebSocket + TLSで検証する場合
+画面からの検索はPahoを読み込めない条件でも試験します。起動試験では本物のStreamlitをローカルで起動し、HTTP応答と終了後のポート解放を確認します。WindowsではPOSIX信号による起動終了試験だけをスキップします。
 
-既存のローカル/LAN用設定を残したまま、`.env.hivemq.example` を `.env.hivemq` にコピーし、全PCで同じランダムなTopic prefixを設定します。
-
-```bash
-python run_role.py weather --env-file .env.hivemq
-```
-
-`weather` を `server`・`pollen`・`recommend`・`ui` に変えて全5役を1つずつ起動します。接続先は `broker.hivemq.com:8884`、`MQTT_TRANSPORT=websockets`、`MQTT_WS_PATH=/mqtt`、`MQTT_TLS=true` です。共通factoryで接続前にWebSocketとTLSを設定し、証明書検証を有効にしています。
-
-**公開Brokerは学習・検証専用です。** 他者も購読・送信できるため、APIキー・パスワード・実際のアレルギー・精密な現在地などはPublishせず、架空の条件を使います。ランダムprefixは混線回避用で、アクセス制御ではありません。
-
-[HiveMQで2台PCを使って検証する手順](docs/mqtt-hivemq.md)に、設定例、全5役の起動、ローカル/LANへの戻し方、テストと未検証範囲をまとめています。
-
-### 日付の共通仕様
-
-アプリの要求と推薦結果は日付を `date`（YYYY-MM-DD）で渡します。旧 `day` は推薦関数の入力時だけ互換用に受け付け、出力は `date` のみです。両方に有効な値がある場合は `date` を優先します。
-
-### 注意
-
-- 1台で動かす場合のブローカーは、自分のPCの Mosquitto（`localhost:1883`）です。
-- 複数PC用の設定例は別ポート `1884` を使います。全員の接続先をそろえ、各担当は1つずつ起動します。
-- `GOOGLE_POLLEN_API_KEY` がないときは花粉がダミーの値になり、画面に「ダミー」と表示されます。
-- 花粉の指数が出ていない日（シーズン外など）は、レベルを「判定不可」にして天気と風だけを表示します。
-- 地域の座標は、通信制御が国土地理院の住所検索で調べます（インターネット接続が必要）。
-- テスト: `python -m pytest -q tests`（推薦のテストは `cd recommend && python -m pytest -q test_recommend.py`）
+実APIの現在の到達性やデータ提供状況、Windows実機での操作は、これらの固定応答テストとは別に確認してください。

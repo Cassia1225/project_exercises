@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 # 1つ上のフォルダー（リポジトリのルート）を読み込み先に追加する（common を使うため）
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-# 通信制御へMQTTで検索を依頼する関数と、選べる地域の一覧
-from mqtt_client import ask_server
+# 検索条件から取得・推薦処理を直接呼ぶ関数と、選べる地域の一覧
+from server.server import ask_server
 from common.locations import PREFECTURES, cities_of
 
 # --- ページ基本設定 ---
@@ -97,7 +97,7 @@ date_options = {
 selected_date_label = st.sidebar.selectbox("確認したい日程", list(date_options.keys()), index=0, key="forecast_date")
 
 
-# 検索ボタン。押したときだけMQTTで問い合わせる
+# 検索ボタン。押したときだけ取得・推薦処理を呼ぶ
 # （チェックボックスを触るたびに再検索しないよう、結果は session_state に保存する）
 st.sidebar.caption("日程候補は日本時間です。天気は対象地域の現地時間、花粉は提供元の日付で表示します。")
 if st.sidebar.button("🔍 対策を調べる", type="primary", use_container_width=True):
@@ -209,4 +209,4 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("花粉対策ナビ - Global & Seasonal Edition (MQTT連携対応版)")
+st.caption("花粉対策ナビ - Global & Seasonal Edition")

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_advisor import make_advisor, make_gemini_advisor, parse_items
-from recommend import UserProfile, recommend
+from recommend.llm_advisor import make_advisor, make_gemini_advisor, parse_items
+from recommend.recommend import UserProfile, recommend
 
 SAMPLE = {
     "request_id": "req-001",
@@ -199,7 +199,7 @@ def test_make_advisor_remains_provider_agnostic():
 
 @pytest.mark.parametrize(("code", "expected"), [(0, "clear"), (3, "other"), (61, "rain"), (71, "rain"), (95, "rain")])
 def test_open_meteo_weather_code(code, expected):
-    from recommend import normalize_weather
+    from recommend.recommend import normalize_weather
     assert normalize_weather(code) == expected
 
 

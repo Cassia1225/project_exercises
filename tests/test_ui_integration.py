@@ -1,4 +1,4 @@
-"""旧UIの追加意図と現行MQTT仕様の結合を確認する。外部APIは固定応答。"""
+"""画面操作と直接呼び出しの結合を確認する。外部APIは固定応答。"""
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -6,9 +6,9 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from common import locations
-import mqtt_client
-from recommend import _allergy_matches
-from get_weather_data import get_weather
+from server import server as controller
+from recommend.recommend import _allergy_matches
+from weather.get_weather_data import get_weather
 
 APP = Path(__file__).resolve().parents[1] / 'UI' / 'app.py'
 
@@ -56,7 +56,7 @@ def test_forecast_uses_location_timezone(monkeypatch):
     response = Mock()
     response.json.return_value = {'daily': {'time': []}}
     get = Mock(return_value=response)
-    monkeypatch.setattr('get_weather_data.requests.get', get)
+    monkeypatch.setattr('weather.get_weather_data.requests.get', get)
     assert get_weather(48.85, 2.35, '2026-10-26') is None
     assert get.call_args.kwargs['params']['timezone'] == 'auto'
 
@@ -70,7 +70,7 @@ def reply(location, target_date, allergies):
 
 def test_ui_sends_canonical_allergies_only_when_clicked_and_keeps_result(monkeypatch):
     ask = Mock(side_effect=reply)
-    monkeypatch.setattr(mqtt_client, 'ask_server', ask)
+    monkeypatch.setattr(controller, 'ask_server', ask)
     app = AppTest.from_file(str(APP)).run()
     assert not app.exception
     assert len(app.button) == 1
@@ -92,7 +92,7 @@ def test_ui_sends_canonical_allergies_only_when_clicked_and_keeps_result(monkeyp
 
 def test_ui_overseas_preset_and_empty_input(monkeypatch):
     ask = Mock(side_effect=reply)
-    monkeypatch.setattr(mqtt_client, 'ask_server', ask)
+    monkeypatch.setattr(controller, 'ask_server', ask)
     app = AppTest.from_file(str(APP)).run()
     app.radio[0].set_value('海外主要都市').run()
     app.selectbox(key='overseas_city').set_value('Paris, France').run()
@@ -114,7 +114,7 @@ def test_ui_keeps_error_and_partial_handling(monkeypatch, status):
     result['errors'] = [{'source': 'server', 'message': '試験用エラー'}]
     if status == 'error':
         result['data'] = None
-    monkeypatch.setattr(mqtt_client, 'ask_server', Mock(return_value=result))
+    monkeypatch.setattr(controller, 'ask_server', Mock(return_value=result))
     app = AppTest.from_file(str(APP)).run()
     app.button[0].click().run()
     assert not app.exception
@@ -151,7 +151,7 @@ def test_ui_starts_without_system_timezone_database():
 
 def test_ui_can_reload_an_old_session_without_crashing(monkeypatch):
     ask = Mock(side_effect=reply)
-    monkeypatch.setattr(mqtt_client, 'ask_server', ask)
+    monkeypatch.setattr(controller, 'ask_server', ask)
     app = AppTest.from_file(str(APP))
     app.session_state['result'] = reply('千葉県 習志野市', '2026-10-26', [])
     app.session_state['searched'] = '千葉県 習志野市 / 今日 (10/26)'

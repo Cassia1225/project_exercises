@@ -16,11 +16,11 @@
 
    APIキーをコードに直接書き込まないでください。
 
-3. テスト実行
-  python -m pytest -q test_recommend.py
+3. テスト実行（リポジトリのルートから）
+  python -m pytest -q recommend/test_recommend.py
 
 4. Geminiを使ってサンプルを実行
-  python llm_advisor.py
+  python recommend/llm_advisor.py
 
 注意
 - test_recommend.py は、元の pytest.py から名前を変更したテストファイルです。

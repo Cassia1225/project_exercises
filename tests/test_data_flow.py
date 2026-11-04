@@ -1,14 +1,13 @@
-"""MQTTでやり取りするデータの作り方を確認するテスト。
+"""地域・予報データと推薦用データの変換を確認するテスト。
 
-実際のAPIやMQTTブローカーには接続しない。
+実際の外部APIには接続しない。
 実行方法（リポジトリのルートで）: python -m pytest -q tests
 """
 from common.locations import find_location
-from get_weather_data import pick_day
-from get_pollen_data import format_pollen_data
-from send_recommend import make_recommend_input
-from server import make_worker_request, make_recommend_request
-from recommend import recommend
+from weather.get_weather_data import pick_day
+from pollen.get_pollen_data import format_pollen_data
+from recommend.service import make_recommend_input
+from recommend.recommend import recommend
 
 
 # ---------- 地域（通信制御） ----------
@@ -103,36 +102,6 @@ def test_format_pollen_data_without_the_date_has_no_upi():
     assert result["upi"] is None
 
 
-# ---------- 通信制御が作るメッセージ ----------
-
-UI_REQUEST = {
-    "request_id": "test-001",
-    "location": "千葉県 習志野市",
-    "date": "2026-10-20",
-    "allergies": ["スギ"],
-}
-
-
-def test_make_worker_request_has_place_and_date():
-    place = find_location("千葉県 習志野市", search=fake_search)
-    message = make_worker_request(UI_REQUEST, place)
-    assert message["request_id"] == "test-001"
-    assert message["date"] == "2026-10-20"
-    assert message["latitude"] == place["latitude"]
-    assert "allergies" not in message  # 気象・花粉にはアレルギーを送らない
-
-
-def test_make_recommend_request_combines_both_results():
-    weather_result = {"request_id": "test-001", "status": "success",
-                      "data": {"weather_code": 0, "wind_speed_max": 3.2}}
-    pollen_result = {"request_id": "test-001", "status": "success",
-                     "data": {"upi": 4, "types": {"WEED": 4}}, "is_mock": False}
-    message = make_recommend_request(UI_REQUEST, weather_result, pollen_result)
-    assert message["weather"]["weather_code"] == 0
-    assert message["pollen"]["upi"] == 4
-    assert message["allergies"] == ["スギ"]
-
-
 # ---------- 推薦（既存の recommend() へ渡す形） ----------
 
 def test_recommend_input_works_with_existing_recommend_function():
@@ -165,28 +134,6 @@ def test_recommend_input_with_missing_pollen_becomes_error():
     assert response["status"] == "error"
 
 
-# ---------- 壊れた・おかしなメッセージへの備え ----------
-
-class FakeMessage:
-    def __init__(self, text):
-        self.payload = text.encode("utf-8")
-
-
-def test_read_json_ignores_non_dict():
-    from common import mqtt_settings as ms
-    assert ms.read_json(FakeMessage("[1, 2]")) is None
-    assert ms.read_json(FakeMessage("{broken")) is None
-    assert ms.read_json(FakeMessage('{"a": 1}')) == {"a": 1}
-
-
-def test_server_ignores_unknown_source():
-    import server
-    server.waiting["x1"] = {"ui_request": UI_REQUEST, "weather": None, "pollen": None}
-    server.on_worker_result(None, {"request_id": "x1", "source": "ui_request"})
-    assert server.waiting["x1"]["ui_request"] == UI_REQUEST
-    server.waiting.clear()
-
-
 # ---------- 花粉の指数が出ていない日（シーズン外など） ----------
 
 def test_format_pollen_data_marks_date_found_even_without_index():
@@ -197,17 +144,8 @@ def test_format_pollen_data_marks_date_found_even_without_index():
     assert result["types"] == {"TREE": None, "GRASS": None}
 
 
-def test_pollen_worker_returns_success_when_index_is_missing(monkeypatch):
-    import send_pollen
-    monkeypatch.setattr(send_pollen, "get_pollen_info",
-                        lambda lat, lon, d: ({"upi": None, "types": {"TREE": None}}, False))
-    reply = send_pollen.handle_request({"request_id": "p1", "latitude": 35, "longitude": 140, "date": "2026-10-20"})
-    assert reply["status"] == "success"
-    assert reply["data"]["upi"] is None
-
-
 def test_recommend_without_pollen_index_shows_level_unknown():
-    from send_recommend import make_response
+    from recommend.service import make_response
     message = {
         "request_id": "test-003",
         "location": "千葉県 習志野市",
@@ -227,7 +165,7 @@ def test_recommend_without_pollen_index_shows_level_unknown():
 
 def test_google_days_counts_from_utc_date():
     from datetime import date
-    from get_pollen_data import days_needed
+    from pollen.get_pollen_data import days_needed
     # 日本の10/19 0時台は、UTCではまだ10/18。Googleの1日目は10/18になる
     assert days_needed("2026-10-19", utc_today=date(2026, 10, 18)) == 2
     assert days_needed("2026-10-18", utc_today=date(2026, 10, 18)) == 1
