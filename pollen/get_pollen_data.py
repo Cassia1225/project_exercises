@@ -53,15 +53,8 @@ def format_pollen_data(raw_pollen_data, target_date):
                 types[type_info["code"]] = None  # 値なし（0とは区別する）
 
     # 値がある（None ではない）ものだけを集める
-    values = []
-    for value in types.values():
-        if value is not None:
-            values.append(value)
-
-    if len(values) == 0:
-        upi = None
-    else:
-        upi = max(values)
+    values = [value for value in types.values() if value is not None]
+    upi = max(values, default=None)
 
     return {"upi": upi, "types": types}
 
@@ -82,12 +75,8 @@ def days_needed(target_date, utc_today=None):
 
     days = (date.fromisoformat(target_date) - utc_today).days + 1
 
-    # 1より小さければ1に、5より大きければ5にする
-    if days < 1:
-        days = 1
-    elif days > 5:
-        days = 5
-    return days
+    # 1〜5日の範囲に収める。
+    return max(1, min(days, 5))
 
 
 # 他のから呼ばれるやつ

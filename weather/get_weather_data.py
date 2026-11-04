@@ -26,16 +26,13 @@ def get_weather(latitude, longitude, target_date):
 
     res = requests.get(URL, params=params, timeout=8)
 
-    #HTTPレスポンスのステータスコードをチェック。
-    #requests.exceptions.HTTPErrorを発生させるメソッド
+    # 取得に失敗した場合は例外として呼び出し元へ伝える。
     res.raise_for_status()
     data = res.json()
-    
-    #data[daily]は、辞書オブジェクト
-    #target_date : 外部から呼ばれた時、呼び出す。
+
     return pick_day(data["daily"], target_date)
 
-#
+
 def pick_day(daily, target_date):
     """APIの daily データから、target_date の日の値だけを取り出す。"""
     if target_date not in daily["time"]:
@@ -44,13 +41,12 @@ def pick_day(daily, target_date):
     # 何番目がその日のデータかを調べる
     i = daily["time"].index(target_date)
 
-    current_obj = {
+    return {
         "weather_code": daily["weather_code"][i],
         "wind_speed_max": daily["wind_speed_10m_max"][i],
         "temperature_mean": daily["temperature_2m_mean"][i],
         "humidity_mean": daily["relative_humidity_2m_mean"][i],
     }
-    return current_obj
 
 
 def check_output(current_obj):

@@ -23,19 +23,11 @@ def make_recommend_input(message):
 
     取得に失敗した情報は None のまま渡す（recommend() がエラーとして返す）。
     """
-    weather = message.get("weather")
-    pollen = message.get("pollen")
-
-    # 取得に失敗していると None なので、空の辞書にしておく（.get が使えるように）
-    if weather is None:
-        weather = {}
-    if pollen is None:
-        pollen = {}
-
-    if pollen.get("upi") is None:
-        pollen_text = None
-    else:
-        pollen_text = upi_to_text(pollen["upi"])
+    # 取得できなかった情報は空の辞書として読み、欠けた値は None にする。
+    weather = message.get("weather") or {}
+    pollen = message.get("pollen") or {}
+    upi = pollen.get("upi")
+    pollen_text = None if upi is None else upi_to_text(upi)
 
     # 指数が2以上（やや多い以上）の種類だけを「飛んでいる花粉」として渡す
     flying_types = []
@@ -61,9 +53,7 @@ def make_no_pollen_response(message):
     指数がないのに「少ない」とは言えないので、レベルは「判定不可」にして、
     取得できた天気と風だけを表示する。status は一部だけ取得できた "partial"。
     """
-    weather = message.get("weather")
-    if weather is None:
-        weather = {}
+    weather = message.get("weather") or {}
     code = weather.get("weather_code")
     wind = weather.get("wind_speed_max")
 
@@ -81,7 +71,7 @@ def make_no_pollen_response(message):
         "location": message["location"],
         "date": message["date"],
         "level": "判定不可",
-        "Pollen": "指数なし",#（この日は花粉の予報データがありません）
+        "Pollen": "指数なし",
         "weather": weather_text,
         "Wind": wind_text,
         "items": [],
@@ -105,4 +95,3 @@ def make_response(message):
 
     # ふつうの場合は、既存の recommend() に任せる
     return recommend(make_recommend_input(message))
-

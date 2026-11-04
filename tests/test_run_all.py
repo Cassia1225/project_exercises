@@ -1,5 +1,4 @@
 """run_all.pyの起動引数・終了処理と、本物のStreamlit起動を確認する。"""
-import importlib.util
 import signal
 import socket
 import subprocess
@@ -11,16 +10,17 @@ from types import SimpleNamespace
 import pytest
 import requests
 
+import run_all
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_launcher(monkeypatch, *, exit_code=0, interrupt=False):
     calls = []
     child = SimpleNamespace(terminated=False, waited=0)
-    interrupt_enabled = False
     def wait(timeout=None):
         child.waited += 1
-        if interrupt_enabled and interrupt and child.waited == 1:
+        if interrupt and child.waited == 1:
             raise KeyboardInterrupt
         return exit_code
     child.wait = wait
@@ -31,20 +31,7 @@ def load_launcher(monkeypatch, *, exit_code=0, interrupt=False):
         calls.append((command, kwargs))
         return child
     monkeypatch.setattr(subprocess, "Popen", popen)
-    # 変更前のrun_all.pyも外部プロセスを作らず読み、待機ループから戻す。
-    sleeps = []
-    def sleep(seconds):
-        sleeps.append(seconds)
-        if len(sleeps) > 1:
-            raise KeyboardInterrupt
-    monkeypatch.setattr(time, "sleep", sleep)
-    spec = importlib.util.spec_from_file_location("launcher_under_test", ROOT / "run_all.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    interrupt_enabled = True
-    child.waited = 0
-    child.terminated = False
-    return module, calls, child
+    return run_all, calls, child
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
