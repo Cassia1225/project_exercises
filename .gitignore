@@ -6,6 +6,7 @@ __pycache__/
 .claude/
 .pytest_cache/
 .gitignore
+.venv/
 
 # 複数PC用の接続設定と、Brokerのパスワードファイル
 .env.lan
