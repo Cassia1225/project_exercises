@@ -3,8 +3,8 @@ import uuid
 import threading
 import paho.mqtt.client as mqtt
 
-BROKER = "broker.hivemq.com"
-PORT = 8884
+BROKER = "broker.emqx.io"
+PORT = 8084
 TOPIC = f"projectensyuu/test/{uuid.uuid4().hex}"
 
 received = threading.Event()

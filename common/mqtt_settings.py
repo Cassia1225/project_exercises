@@ -3,7 +3,7 @@
 接続先（ブローカー）は .env の MQTT_BROKER で変えられる。
 何も書かなければ、自分のPCで動かしている Mosquitto（localhost）につなぐ。
 
-別々のPCでは .env.lan（Mosquitto）か .env.hivemq（公開Broker）を選ぶ。
+別々のPCでは .env.emqx（EMQX）、.env.lan（Mosquitto）、.env.hivemqを選ぶ。
 公開Brokerは学習・検証専用。秘密情報や実在する個人の情報を送らない。
 """
 import json
@@ -79,7 +79,7 @@ def create_client(role):
     if TLS:
         # OSの信頼済みCAとホスト名を検証する。tls_insecure_set(True)は使わない。
         client.tls_set()
-    if BROKER.lower() == "broker.hivemq.com":
+    if BROKER.lower() in ("broker.hivemq.com", "broker.emqx.io"):
         print("公開Brokerは学習・検証専用です。秘密情報・実際の個人情報をPublishしないでください")
     if USERNAME:
         client.username_pw_set(USERNAME, PASSWORD)

@@ -14,6 +14,11 @@ from common import mqtt_settings as ms
 
 @pytest.mark.skipif(os.getenv("RUN_HIVEMQ_TEST") != "1", reason="公開Broker試験は明示指定時のみ実施")
 def test_five_roles_over_hivemq_websockets_tls(monkeypatch):
+    exercise_five_roles_over_websockets_tls(monkeypatch, "broker.hivemq.com", 8884)
+
+
+def exercise_five_roles_over_websockets_tls(monkeypatch, broker, port):
+    """外部APIだけを固定応答にし、指定Brokerで全役の実MQTTを往復する。"""
     import server
     import send_weather
     import send_pollen
@@ -21,7 +26,7 @@ def test_five_roles_over_hivemq_websockets_tls(monkeypatch):
     from mqtt_client import ask_server
 
     prefix = "project-exercises-test/" + uuid.uuid4().hex
-    for name, value in {"BROKER": "broker.hivemq.com", "PORT": 8884,
+    for name, value in {"BROKER": broker, "PORT": port,
                         "TRANSPORT": "websockets", "WS_PATH": "/mqtt", "TLS": True,
                         "USERNAME": "", "PASSWORD": "", "PREFIX": prefix}.items():
         monkeypatch.setattr(ms, name, value)
@@ -34,6 +39,7 @@ def test_five_roles_over_hivemq_websockets_tls(monkeypatch):
         monkeypatch.setattr(ms, name, prefix + suffix)
     monkeypatch.setattr(server, "find_location", lambda name: {"name": name, "latitude": 0.0, "longitude": 0.0})
     monkeypatch.setattr(server, "waiting", {})
+    monkeypatch.setattr(server, "completed", {})
     monkeypatch.setattr(send_weather, "get_weather", lambda lat, lon, day: {"weather_code": 0, "wind_speed_max": 1.0})
     monkeypatch.setattr(send_pollen, "get_pollen_info", lambda lat, lon, day: ({"upi": 3, "types": {"WEED": 3}}, True))
     clients = []

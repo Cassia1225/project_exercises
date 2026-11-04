@@ -153,16 +153,19 @@ Path("settings.json").write_text(json.dumps({key: os.getenv(key) for key in keys
     assert __import__("os").getenv("MQTT_PASSWORD") == "test-only"
 
 
-@pytest.mark.parametrize("subscribed", [True, False])
-def test_ui_keeps_subscription_and_result_timeouts(subscribed, monkeypatch):
+@pytest.mark.parametrize("connected,subscribed", [(False, False), (True, False), (True, True)])
+def test_ui_keeps_connection_subscription_and_result_timeouts(connected, subscribed, monkeypatch):
     import mqtt_client
     waits, subscriptions, published, stopped = [], [], [], []
-    event = SimpleNamespace(set=lambda: None, wait=lambda timeout: waits.append(timeout) or subscribed)
-    monkeypatch.setattr(mqtt_client.threading, "Event", lambda: event)
+    events = iter([
+        SimpleNamespace(set=lambda: None, wait=lambda timeout: waits.append(("connect", timeout)) or connected),
+        SimpleNamespace(set=lambda: None, wait=lambda timeout: waits.append(("subscribe", timeout)) or subscribed),
+    ])
+    monkeypatch.setattr(mqtt_client.threading, "Event", lambda: next(events))
     result_queue = SimpleNamespace(put=lambda data: None)
 
     def get(timeout):
-        waits.append(timeout)
+        waits.append(("result", timeout))
         raise mqtt_client.queue.Empty
 
     result_queue.get = get
@@ -181,11 +184,16 @@ def test_ui_keeps_subscription_and_result_timeouts(subscribed, monkeypatch):
     monkeypatch.setattr(ms, "create_client", lambda role: client)
     result = mqtt_client.ask_server("架空のテスト地域", "2026-10-30", [])
     assert result["status"] == "error"
-    assert waits == ([10, 30] if subscribed else [10])
+    expected_waits = [("connect", 60)]
+    if connected:
+        expected_waits.append(("subscribe", 60))
+        if subscribed:
+            expected_waits.append(("result", 60))
+    assert waits == expected_waits
     assert stopped == [(ms.BROKER, ms.PORT, 60), "loop_stop", "disconnect"]
     assert len(subscriptions) == 2 and subscriptions[0] == subscriptions[1]
     assert subscriptions[0][1] == 1
-    if subscribed:
+    if connected and subscribed:
         topic, payload, qos = published[0]
         assert (topic, qos) == (ms.TOPIC_REQUEST, 1)
         assert set(payload) == {"request_id", "location", "date", "allergies"}

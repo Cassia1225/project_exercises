@@ -18,3 +18,8 @@ __pycache__/
 .env.hivemq.*
 !.env.hivemq.example
 .env.hivemq.example
+
+# EMQXの個人設定は除外し、配布する見本だけ共有する。
+.env.emqx
+.env.emqx.*
+!.env.emqx.example

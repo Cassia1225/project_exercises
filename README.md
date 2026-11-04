@@ -1,5 +1,18 @@
 プロジェクト演習の開発で使用するリポジトリです。
 
+## EMQX用ブランチの起動
+
+このブランチの単独送受信テストは `broker.emqx.io:8084` のWebSocket＋TLSを使います。
+アプリ全体は `.env.emqx.example` を `.env.emqx` へコピーし、代表者が決めた同一のランダムTopic prefixを全PCに設定して起動します。既存の設定ファイルは上書きしません。
+
+```bash
+python run_role.py weather --env-file .env.emqx
+```
+
+`weather` を `server`・`pollen`・`recommend`・`ui` に変え、各担当を全体で1つずつ起動します。
+文字列の疎通確認から全5役の起動まで、[EMQX用の手順](docs/mqtt-emqx.md)を参照してください。
+公開Brokerでは架空条件を使い、秘密値・個人情報を送信しません。
+
 ##ブランチ
 
 main : 最終統合先
